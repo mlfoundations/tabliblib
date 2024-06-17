@@ -1,4 +1,4 @@
-# tabliblib
+# tabliblib: A toolkit for processing TabLib
 
 `tabliblib` is a Python library for processing data from [TabLib](https://arxiv.org/abs/2310.07875).
 `tabliblib` supports table-, row-, and column-level filtering of tables to extract
