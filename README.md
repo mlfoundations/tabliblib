@@ -4,23 +4,28 @@
 `tabliblib` supports table-, row-, and column-level filtering of tables to extract
 a high-quality pool of tabular data from the raw TabLib corpus.
 
-`tabliblib` was used to build The Tremendous TabLib Trawl (T4), the dataset used to 
-train Tabula-8B, which is the tabular prediction foundation model described in
-"Large-Scale Transfer Learning for Tabular Data via Language Modeling".
+`tabliblib` was used to build [The Tremendous TabLib Trawl (T4)](https://huggingface.co/datasets/mlfoundations/t4-full), 
+the dataset used to train [TabuLa-8B](https://huggingface.co/mlfoundations/tabula-8b), 
+which is the state-of-the-art zero- and few-shot tabular prediction foundation model 
+described in our paper "Large-Scale Transfer Learning for Tabular Data via Language Modeling".
+
+<div align=center>
+<img alt="few-shot results curve" src="https://github.com/mlfoundations/tabliblib/blob/main/assets/all_tasks_curves.png" width=50%>
+</div>
 
 *This is an alpha release of `tabliblib`!* We expect the API to evolve over time
 and do not guarantee that it will remain stable.
 We are providing this alpha version in an effort to make our dataset creation process
 transparent and reproducible for the community.
 
-The T4 dataset can be accessed on Hugging Face here.
+The T4 dataset can be accessed on Hugging Face [here](https://huggingface.co/datasets/mlfoundations/t4-full).
 
 The authors of `tabliblib` are not affiliated with the creation of TabLib or Approximate Labs
 (although we are grateful to the creators of TabLib for their contributions to the community!).
 
 # Quickstart
 
-First, set up your ennvironment using either the provided Conda `environment.yml`
+First, set up your environment using either the provided Conda `environment.yml`
 file or `requirements.txt`.
 
 You will also need access to TabLib. You can request access 
@@ -101,3 +106,14 @@ For training [TabuLa-8B](https://huggingface.co/mlfoundations/tabula-8b),
 we used the [`rtfm`](https://github.com/mlfoundations/rtfm) library, which contains utilities
 to serialize Parquet files into text, construct supervised prediction tasks
 from the tables, and train a language model for tabular tasks.
+
+# Additional Resources
+
+Some additional resources relevant to `tabliblib`:
+
+* Our paper, "Large Scale Transfer Learning for Tabular Data via Language Modeling"
+* The [t4 dataset](https://huggingface.co/datasets/mlfoundations/t4-full) on Hugging Face (used to train TabuLa-8B)
+* The TabuLa-8B [evaluation suite data](https://huggingface.co/datasets/mlfoundations/tabula-8b-eval-suite) on Hugging
+  Face
+* The [TabuLa-8B model](https://huggingface.co/mlfoundations/tabula-8b) on Hugging Face
+* [`rtfm`](https://github.com/mlfoundations/rtfm), a toolkit for training tabular foundation models
