@@ -6,6 +6,7 @@ from typing import Dict, Any
 import numpy as np
 
 import tabliblib
+import tabliblib.io
 from tabliblib.language_detection import detect
 
 
@@ -45,7 +46,7 @@ def drop_duplicates(batch: Dict[str, np.ndarray],
 
 def add_dataframe_summary_info(row):
     """Parse the arrow bytes and add summary information about the dataset."""
-    df = tabliblib.read_arrow_bytes(row["arrow_bytes"])
+    df = tabliblib.io.read_arrow_bytes(row["arrow_bytes"])
     if df is not None:
         row["nrows"], row["ncols"] = df.shape
         row["dtype_counts"] = str(df.dtypes.value_counts().to_dict())  # json.dumps() doesn't work with dtype keys

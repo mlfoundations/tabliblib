@@ -6,21 +6,13 @@ Usage:
 
 Make sure to start the ray head node first with `ray start --head `. Then:
 
-# local test, without dedup
-python scripts/process_tablib.py \
-    --data_dir "sample-shards/tablib-v1-sample-tiny/" \
-    --max_shards 1 \
-    --output_dir ./tmp/tablib_processed/v1-sample-tiny/ \
-    --read_mem_per_worker_gb 2
-
 # local test, with dedup
 python scripts/process_tablib.py \
-    --data_dir "sample-shards/tablib-v1-sample/" \
-    --output_dir "./tmp/tablib_processed/v1-sample-tiny-dedup/" \
-    --dedup_dir "./tmp/tablib_processed/dedup/" \
-    --read_mem_per_worker_gb 1 \
-    --write_mem_per_worker_gb 1 \
-    --config_version v5
+    --data_dir "sample-shards/tablib-v1-sample-tiny/" \
+    --output_dir ./tmp/tablib_processed/v1-sample-tiny/ \
+    --read_mem_per_worker_gb 2 \
+    --dedup_dir ./tmp/tablib_processed/dedup/ \
+    --config_version v6
 
 
 # run on hyak on full dataset, deduped
@@ -55,7 +47,7 @@ import ray
 from tabliblib.config import PREPROCESS_VERSIONS
 from tabliblib.dedup_utils import path_to_str
 from tabliblib.filters import is_english, dataframe_filter
-from tabliblib.io import DataFrameFileDataSink
+from tabliblib.dataframe_utils import DataFrameFileDataSink
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 
@@ -72,8 +64,8 @@ def get_parallelism(num_cores, available_memory, partition_size):
 
 def main(
         config_version: str,
+        dedup_dir: str,
         data_dir: str = "./sample-shards/",
-        dedup_dir: Optional[str] = None,
         chunk_size: int = 512,
         chunk_index: int = 0,
         shuffle_input_files: bool = True,

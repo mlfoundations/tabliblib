@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from typing import Optional, Sequence, Dict
 
@@ -22,6 +23,10 @@ class PreprocessConfig:
         float] = None  # if any columns has >= this proportion of PII detected, drop the table
     code_detect_filter_threshold: Optional[
         float] = None  # if any columns has >= this proportion of code detected, drop the table
+
+    # Note that the quality classifier, if used, is applied AFTER the row- and column-level filtering.
+    table_quality_threshold: Optional[float] = None
+    table_quality_classifier: Optional[str] = os.path.join(os.path.dirname(__file__), "xgb_quality_scorer.json")
 
     # Column-level filters
     drop_invalid_cols: bool = True
@@ -72,6 +77,17 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
     # (effectively, all tables passed this check). Once the bug was fixed in v6, we set min_dtypes to None
     # for consistency.
     "v6": PreprocessConfig(max_null_like_frac=0.1,
+                           drop_extra_cols=True,
+                           drop_invalid_cols=True,
+                           pii_detect_filter_threshold=0.05,
+                           code_detect_filter_threshold=0.05,
+                           filter_rows_containing_pii=True,
+                           min_rows=64,
+                           filter_rows_containing_code=True,
+                           drop_duplicate_rows=True,
+                           max_frac_unnamed_columns=0.5,
+                           min_dtypes=None),
+"v7": PreprocessConfig(max_null_like_frac=0.1,
                            drop_extra_cols=True,
                            drop_invalid_cols=True,
                            pii_detect_filter_threshold=0.05,

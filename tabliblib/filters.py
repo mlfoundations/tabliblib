@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Callable
 import numpy as np
 import pandas as pd
 
-from tabliblib import read_arrow_bytes
+from tabliblib.io import read_arrow_bytes
 from tabliblib.config import PreprocessConfig
 
 
