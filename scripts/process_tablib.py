@@ -44,10 +44,11 @@ import psutil
 import pyarrow as pa
 import ray
 
+from tabliblib import filters
 from tabliblib.config import PREPROCESS_VERSIONS
-from tabliblib.dedup_utils import path_to_str
-from tabliblib.filters import is_english, dataframe_filter
 from tabliblib.dataframe_utils import DataFrameFileDataSink
+from tabliblib.dedup_utils import path_to_str
+from tabliblib.filters import is_english
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 
@@ -180,13 +181,28 @@ def main(
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
+    table_filter_chain = filters.TableFilterChain([
+        filters.RowCountFilter(min_rows=preprocess_config.min_rows),
+        filters.ColumnCountFilter(min_columns=preprocess_config.min_cols,
+                                  max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
+        filters.BadHeadersFilter(max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
+                                 max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
+        filters.SchemaFilter(preprocess_config.min_dtypes),
+        filters.ValidColumnCountFilter(max_header_len_chars=preprocess_config.max_header_len_chars,
+                                       min_unique_column_values=preprocess_config.min_unique_column_values,
+                                       max_null_like_frac=preprocess_config.max_null_like_frac,
+                                       min_cols=preprocess_config.min_cols),
+        filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
+        filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
+
+    ])
+
     # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the
     #  dataframe one time.
-    _dataframe_filter = partial(dataframe_filter, config=preprocess_config, use_precomputed=True)
     _english_filter = partial(is_english, threshold=preprocess_config.langdetect_threshold)
     ds = ds \
         .filter(_english_filter) \
-        .filter(_dataframe_filter)
+        .filter(table_filter_chain)
 
     # Allocate more resources to writing; this requires more memory bc arrow bytes are expanded
     #  into a pandas dataframe.

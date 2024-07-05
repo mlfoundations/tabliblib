@@ -1,3 +1,7 @@
+"""
+To run tests:
+python -m unittest tabliblib/test_filters.py
+"""
 import random
 import string
 import unittest
@@ -198,3 +202,83 @@ class TestFilters(unittest.TestCase):
         ]
         for non_kv_header in non_kv_headers:
             self.assertFalse(is_kv_header(non_kv_header))
+
+
+from tabliblib.filters import (TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, SchemaFilter,
+                               ValidColumnCountFilter, CodeDetectionFilter, PIIDetectionFilter)
+from tabliblib.io import write_arrow_bytes
+
+
+class TestTableFilterChain(unittest.TestCase):
+    def test_simple_filter_chain(self):
+        df = pd.DataFrame({
+            "x": [199, 299, 399],
+            "1.456": [199, 299, 399],
+            "-3.14": [199, 299, 399],
+            "0000": [199, 299, 399],
+
+        })
+        table_filter_chain = TableFilterChain([RowCountFilter(min_rows=2), ColumnCountFilter(min_columns=2)])
+        self.assertTrue(table_filter_chain(df))
+
+        table_filter_chain = TableFilterChain([RowCountFilter(min_rows=5), ColumnCountFilter(min_columns=2)])
+        self.assertFalse(table_filter_chain(df))
+
+    def test_simple_filter_chain_with_arrow_bytes(self):
+        df = pd.DataFrame({
+            "x": [199, 299, 399],
+            "1.456": [199, 299, 399],
+            "-3.14": [199, 299, 399],
+            "0000": [199, 299, 399],
+
+        })
+        elem = {"arrow_bytes": write_arrow_bytes(df)}
+        table_filter_chain = TableFilterChain([RowCountFilter(min_rows=2), ColumnCountFilter(min_columns=2)])
+        self.assertTrue(table_filter_chain(elem))
+
+        table_filter_chain = TableFilterChain([RowCountFilter(min_rows=5), ColumnCountFilter(min_columns=2)])
+        self.assertFalse(table_filter_chain(elem))
+
+    def test_simple_filter_chain_with_none(self):
+        table_filter_chain = TableFilterChain([RowCountFilter(min_rows=5), ColumnCountFilter(min_columns=2)])
+        self.assertFalse(table_filter_chain(None))
+
+    def test_long_filter_chain(self):
+        df = pd.DataFrame({
+            "x": [199, 299, 399],
+            "1.456": [199, 299, 399],
+            "-3.14": [199, 299, 399],
+            "0000": [199, 299, 399],
+            "category": ["A", "B", "C"],
+
+        })
+        table_filter_chain = TableFilterChain(
+            [
+                RowCountFilter(min_rows=2),
+                ColumnCountFilter(min_columns=2),
+                BadHeadersFilter(max_frac_numeric_colnames=0.75),
+                SchemaFilter(min_dtypes=2),
+                ValidColumnCountFilter(max_header_len_chars=100,
+                                       min_unique_column_values=2,
+                                       max_null_like_frac=1.,
+                                       min_cols=2),
+                CodeDetectionFilter(0.1),
+                PIIDetectionFilter(0.1),
+            ])
+        self.assertTrue(table_filter_chain(df))
+
+        # Same as above except with a valid column count filter that should reject the dataframe.
+        table_filter_chain = TableFilterChain(
+            [
+                RowCountFilter(min_rows=2),
+                ColumnCountFilter(min_columns=2),
+                BadHeadersFilter(max_frac_numeric_colnames=0.75),
+                SchemaFilter(min_dtypes=2),
+                ValidColumnCountFilter(max_header_len_chars=100,
+                                       min_unique_column_values=2,
+                                       max_null_like_frac=1.,
+                                       min_cols=6),  # <-- this should trigger rejection
+                CodeDetectionFilter(0.1),
+                PIIDetectionFilter(0.1),
+            ])
+        self.assertFalse(table_filter_chain(df))

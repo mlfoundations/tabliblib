@@ -1,13 +1,68 @@
-import json
 import logging
 import re
-from typing import Dict, Any, List, Optional, Callable
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Callable, Union, Sequence
 
 import numpy as np
 import pandas as pd
 
-from tabliblib.io import read_arrow_bytes
 from tabliblib.config import PreprocessConfig
+from tabliblib.io import read_arrow_bytes
+
+
+class Filter(ABC):
+    """Generic class to represent a filter."""
+
+    def __call__(self, *args, **kwargs):
+        raise
+
+
+class TableFilter(Filter):
+    """TableFilters either include or exclude a table. They never modify the table."""
+
+    @abstractmethod
+    def __call__(self, df: pd.DataFrame) -> bool:
+        raise
+
+
+@dataclass
+class TableFilterChain(ABC):
+    """A chain of TableFilters, applied sequentially."""
+    _chain: List[TableFilter] = field(default_factory=list)
+
+    def append(self, filter: TableFilter):
+        self._chain.append(filter)
+
+    def extend(self, filters: Sequence[TableFilter]) -> None:
+        for flt in filters:
+            assert isinstance(flt, TableFilter), f"expected TableFilter, got type {type(flt)}"
+            self._chain.append(flt)
+
+    def __call__(self, elem: Union[pd.DataFrame, None, Dict[str, Any]],
+                 dict_key="arrow_bytes",
+                 parse_arrow_bytes_from_dict: bool = True) -> bool:
+        """Apply the filters to elem.
+        
+        If False, this means the table should be excluded (the filters 'triggered').
+        If True, this means the table should be retrained (the filters did not 'trigger').
+
+        Elem can be a DataFrame, a dictionary containing a DataFrame or Arrow bytes
+        as a value under dict_key, or None (in which case the chain will return False).
+        """
+        if elem is None:
+            return False
+        if isinstance(elem, Dict):
+            df = elem[dict_key]
+            if parse_arrow_bytes_from_dict:
+                df = read_arrow_bytes(df)
+        else:
+            df = elem
+
+        for filter_obj in self._chain:
+            if not filter_obj(df):
+                return False
+        return True
 
 
 def convert_bytes_to_string(byte_sequence) -> str:
@@ -117,18 +172,19 @@ def compute_frac_numeric_colnames(df) -> float:
 
 
 def has_bad_column_headers(df: pd.DataFrame,
-                           config: PreprocessConfig) -> bool:
+                           max_frac_numeric_colnames: Union[float, None],
+                           max_frac_unnamed_columns: Union[float, None]) -> bool:
     # Note: headers can be of numeric types (i.e. np.float64, etc) and bytes type so
     # they must be explicitly cast to string first.
     if str(df.columns[0]).startswith("{") and str(df.columns[-1]).endswith("}"):
         return True
 
-    if (config.max_frac_numeric_colnames is not None
-            and compute_frac_numeric_colnames(df) > config.max_frac_numeric_colnames):
+    if (max_frac_numeric_colnames is not None
+            and compute_frac_numeric_colnames(df) > max_frac_numeric_colnames):
         return True
 
-    if config.max_frac_unnamed_columns is not None and np.mean(
-            ["Unnamed:" in cast_to_str(c) for c in df.columns]) > config.max_frac_unnamed_columns:
+    if max_frac_unnamed_columns is not None and np.mean(
+            ["Unnamed:" in cast_to_str(c) for c in df.columns]) > max_frac_unnamed_columns:
         return True
 
     if any(is_kv_header(x) for x in df.columns):
@@ -220,21 +276,106 @@ def fetch_names_of_valid_columns(df, max_header_len_chars: int,
             and (compute_frac_null_like(df[x]) < max_null_like_frac if max_null_like_frac is not None else True)]
 
 
+@dataclass
+class RowCountFilter(TableFilter):
+    min_rows: int
+    max_rows: Optional[int] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        if len(df) < self.min_rows:
+            return False
+        elif self.max_rows is not None and len(df) > self.max_rows:
+            return False
+        else:
+            return True
+
+
+@dataclass
+class ColumnCountFilter(TableFilter):
+    min_columns: int
+    max_columns: Optional[int] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        if len(df.columns) < self.min_columns:
+            return False
+        elif self.max_columns is not None and len(df.columns) > self.max_columns:
+            return False
+        return True
+
+@dataclass
+class BadHeadersFilter(TableFilter):
+    max_frac_numeric_colnames: Optional[float] = None
+    max_frac_unnamed_columns: Optional[float] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        if has_bad_column_headers(df, max_frac_numeric_colnames=self.max_frac_numeric_colnames,
+                                  max_frac_unnamed_columns=self.max_frac_unnamed_columns):
+            return False
+        return True
+
+
+@dataclass
+class SchemaFilter(TableFilter):
+    """Filter based on the schema of the table."""
+    min_dtypes: Optional[int] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        if self.min_dtypes is not None and len(df.dtypes.value_counts()) < self.min_dtypes:
+            return False
+        return True
+
+
+@dataclass
+class ValidColumnCountFilter(TableFilter):
+    max_header_len_chars: int
+    min_unique_column_values: int
+    max_null_like_frac: float
+    min_cols: int
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        valid_cols = fetch_names_of_valid_columns(
+            df,
+            max_header_len_chars=self.max_header_len_chars,
+            min_unique_column_values=self.min_unique_column_values,
+            max_null_like_frac=self.max_null_like_frac)
+
+        if len(valid_cols) < self.min_cols:
+            return False
+        return True
+
+
+@dataclass
+class CodeDetectionFilter(TableFilter):
+    """Designed to drop tables containing code.
+    This is a frequent occurrence in TabLib, and therefore
+    necessitates its own table-level filter to aggressively remove code."""
+    code_detect_filter_threshold: Optional[float] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        string_colnames = [c for c in df.columns if is_string_column(df[c])]
+        if self.code_detect_filter_threshold is not None and any(
+                compute_frac_contains_code(df[c]) > self.code_detect_filter_threshold for c in string_colnames):
+            return False
+        return True
+
+
+@dataclass
+class PIIDetectionFilter(TableFilter):
+    """Designed to drop tables containing PII."""
+    pii_detect_filter_threshold: Optional[float] = None
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        string_colnames = [c for c in df.columns if is_string_column(df[c])]
+        if self.pii_detect_filter_threshold is not None and any(
+                compute_frac_contains_pii(df[c]) for c in string_colnames
+        ):
+            return False
+        return True
+
+
 def dataframe_filter(row: Dict[str, Any],
                      config: PreprocessConfig,
-                     use_precomputed: bool = False,
                      ) -> bool:
-    if use_precomputed:
-        assert all(x in row for x in ("nrows", "ncols", "dtype_counts"))
-        if all(row[x] is None for x in ("nrows", "ncols", "dtype_counts")):
-            return False
-        if row["nrows"] < config.min_rows:
-            return False
-        if row["ncols"] < config.min_cols:
-            return False
-        if config.min_dtypes and len(json.loads(row["dtype_counts"])) < config.min_dtypes:
-            return False
-
     # Apply filters in order of least-to-most computationally expensive, so we avoid
     # performing slower processing operations when the table is excluded due to other cheaper operations.
     df = read_arrow_bytes(row["arrow_bytes"])
@@ -244,7 +385,7 @@ def dataframe_filter(row: Dict[str, Any],
         return False
     if config.filter_too_many_columns and (df.shape[1] > config.max_cols):
         return False
-    if has_bad_column_headers(df, config):
+    if has_bad_column_headers(df, config.max_frac_numeric_colnames, config.max_frac_unnamed_columns):
         return False
     if config.min_dtypes is not None and len(df.dtypes.value_counts()) < config.min_dtypes:
         return False
@@ -262,10 +403,14 @@ def dataframe_filter(row: Dict[str, Any],
     if config.drop_invalid_cols:
         string_colnames = list(set(string_colnames).intersection(set(valid_cols)))
 
+    # TODO(jpgard): This does not apply the code detection filter threshold
+    #  and instead would fire if any column is detected as
+    #  containing a nonzero amount of code (which is indeed our current use,
+    #  but does not reflect the interface intended by the PreprocessConfig).
     if config.code_detect_filter_threshold is not None and any(
             compute_frac_contains_code(df[c]) for c in string_colnames):
         return False
-
+    # TODO(jpgard): same as above.
     if config.pii_detect_filter_threshold is not None and any(
             compute_frac_contains_pii(df[c]) for c in string_colnames
     ):

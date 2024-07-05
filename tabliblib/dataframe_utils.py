@@ -89,8 +89,8 @@ def write_dataframe_to_file(row: Dict[str, Any], root_dir: str, output_format: s
         logging.warning(f"dataframe contains {len(df)} rows after filtering; dropping")
         return row
 
-    if config.drop_extra_rows and len(df) > config.max_rows:
-        df = df.sample(n=config.max_rows, replace=False)
+    if config.drop_extra_rows and len(df) > config.max_output_rows:
+        df = df.sample(n=config.max_output_rows, replace=False)
         if not len(df):
             return row
 

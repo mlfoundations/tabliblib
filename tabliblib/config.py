@@ -13,7 +13,7 @@ class PreprocessConfig:
     max_frac_numeric_colnames: Optional[float] = 0.1  # if None, this threshold is not applied.
     langdetect_threshold: float = 0.5
     min_rows: int = 100
-    max_rows: int = 1000
+    max_output_rows: int = 1000
     max_frac_unnamed_columns: Optional[float] = 0.5
     drop_extra_rows: bool = True
     min_cols: int = 6
@@ -105,7 +105,7 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                                  max_frac_numeric_colnames=1.,
                                  langdetect_threshold=0.,
                                  min_rows=1,
-                                 max_rows=1000,
+                                 max_output_rows=1000,
                                  max_frac_unnamed_columns=1,
                                  drop_extra_rows=True,
                                  min_cols=1,
