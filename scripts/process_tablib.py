@@ -6,7 +6,7 @@ Usage:
 
 Make sure to start the ray head node first with `ray start --head `. Then:
 
-# local test, with dedup
+# local test
 python scripts/process_tablib.py \
     --data_dir "sample-shards/tablib-v1-sample-tiny/" \
     --output_dir ./tmp/tablib_processed/v1-sample-tiny/ \
@@ -15,7 +15,7 @@ python scripts/process_tablib.py \
     --config_version v6
 
 
-# run on hyak on full dataset, deduped
+# run on hyak on full dataset
 ray start --head --temp-dir=/gscratch/scrubbed/jpgard/ray-tmp
 ray start --head --temp-dir=/gscratch/efml/jpgard/tabliblib/ray-tmp
 unset http_proxy; unset https_proxy; \
@@ -43,6 +43,7 @@ import pandas as pd
 import psutil
 import pyarrow as pa
 import ray
+from xgboost import XGBClassifier
 
 from tabliblib import filters
 from tabliblib.config import PREPROCESS_VERSIONS
@@ -51,6 +52,7 @@ from tabliblib.dedup_utils import path_to_str
 from tabliblib.filters import is_english
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
+from tabliblib.summarizers import TableSummarizer
 
 RANDOM_SEED = 2974
 
@@ -178,6 +180,11 @@ def main(
     print(f"[INFO] schema is {ds.schema()}")
     print(f"[INFO] ds is {ds}")
 
+    clf = XGBClassifier()
+    summarizer = TableSummarizer()
+    print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
+    clf.load_model(preprocess_config.table_quality_classifier)
+
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
@@ -194,6 +201,10 @@ def main(
                                        min_cols=preprocess_config.min_cols),
         filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
         filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
+        filters.TableQualityFilter(
+            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
+            classifier=clf,
+            threshold=preprocess_config.table_quality_threshold),
 
     ])
 
