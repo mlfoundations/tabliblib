@@ -1,5 +1,4 @@
 import json
-import os
 from dataclasses import dataclass
 from typing import Optional, Sequence, Dict
 
@@ -26,7 +25,7 @@ class PreprocessConfig:
 
     # Note that the quality classifier, if used, is applied AFTER the row- and column-level filtering.
     table_quality_threshold: Optional[float] = None
-    table_quality_classifier: Optional[str] = os.path.join(os.path.dirname(__file__), "xgb_quality_scorer.json")
+    table_quality_classifier: Optional[str] = None
 
     # Column-level filters
     drop_invalid_cols: bool = True
@@ -87,7 +86,7 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                            drop_duplicate_rows=True,
                            max_frac_unnamed_columns=0.5,
                            min_dtypes=None),
-"v7": PreprocessConfig(max_null_like_frac=0.1,
+    "v7": PreprocessConfig(max_null_like_frac=0.1,
                            drop_extra_cols=True,
                            drop_invalid_cols=True,
                            pii_detect_filter_threshold=0.05,
@@ -97,7 +96,10 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                            filter_rows_containing_code=True,
                            drop_duplicate_rows=True,
                            max_frac_unnamed_columns=0.5,
-                           min_dtypes=None),
+                           min_dtypes=None,
+                           table_quality_threshold=0.0055,
+                           table_quality_classifier="xgb_quality_scorer.json"
+                           ),
     # "Unfiltered" version of TabLib, except some filters
     # to ensure inputs do not exceed memory/disk limitations
     # and can fit into downstream context window.
