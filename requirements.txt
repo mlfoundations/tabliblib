@@ -7,3 +7,5 @@ fasttext
 fire
 grpcio
 tqdm
+nltk
+xgboost
