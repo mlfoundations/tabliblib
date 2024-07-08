@@ -9,7 +9,9 @@ from typing import List
 
 import numpy as np
 import pandas as pd
+from xgboost import XGBClassifier
 
+from tabliblib.summarizers import TableSummarizer
 from tabliblib.filters import contains_pii, contains_code, compute_frac_null_like, is_kv_header, \
     compute_frac_contains_code, apply_row_based_filter, compute_frac_numeric_colnames
 
@@ -205,7 +207,8 @@ class TestFilters(unittest.TestCase):
 
 
 from tabliblib.filters import (TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, SchemaFilter,
-                               ValidColumnCountFilter, CodeDetectionFilter, PIIDetectionFilter)
+                               ValidColumnCountFilter, CodeDetectionFilter, PIIDetectionFilter,
+                               TableQualityFilter)
 from tabliblib.io import write_arrow_bytes
 
 
@@ -242,6 +245,25 @@ class TestTableFilterChain(unittest.TestCase):
     def test_simple_filter_chain_with_none(self):
         table_filter_chain = TableFilterChain([RowCountFilter(min_rows=5), ColumnCountFilter(min_columns=2)])
         self.assertFalse(table_filter_chain(None))
+
+    def test_table_quality_filter(self, model_path="xgb_quality_scorer.json"):
+        df = pd.DataFrame({
+            "x": [199, 299, 399],
+            "1.456": [199, 299, 399],
+            "-3.14": [199, 299, 399],
+            "0000": [199, 299, 399],
+
+        })
+        clf = XGBClassifier()
+        summarizer = TableSummarizer()
+        print(f"reloading model from saved checkpoint {model_path}")
+        clf.load_model(model_path)
+        quality_filter = TableQualityFilter(
+            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
+            classifier=clf,
+            threshold=1e-10)
+        table_filter_chain = TableFilterChain([quality_filter])
+        self.assertTrue(table_filter_chain(df))
 
     def test_long_filter_chain(self):
         df = pd.DataFrame({

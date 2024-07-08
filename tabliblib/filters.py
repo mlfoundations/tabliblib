@@ -7,7 +7,6 @@ from typing import Dict, Any, List, Optional, Callable, Union, Sequence
 import numpy as np
 import pandas as pd
 
-from tabliblib.config import PreprocessConfig
 from tabliblib.io import read_arrow_bytes
 
 
@@ -302,6 +301,7 @@ class ColumnCountFilter(TableFilter):
             return False
         return True
 
+
 @dataclass
 class BadHeadersFilter(TableFilter):
     max_frac_numeric_colnames: Optional[float] = None
@@ -357,6 +357,39 @@ class CodeDetectionFilter(TableFilter):
                 compute_frac_contains_code(df[c]) > self.code_detect_filter_threshold for c in string_colnames):
             return False
         return True
+
+
+class ClassifierBasedFilter(TableFilter):
+    """Abstract class for classifier-based filtering.
+
+    This should be subclassed."""
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        raise
+
+
+@dataclass
+class TableQualityFilter(ClassifierBasedFilter):
+    """Score-based table quality filter."""
+    feature_extraction_fn: Callable[[pd.DataFrame], Any]
+    classifier: Any
+    threshold: float
+
+    def __call__(self, df: pd.DataFrame) -> bool:
+        features = self.feature_extraction_fn(df)
+        # Reorder the features according to the column ordering at train time
+        #  to avoid XGBoost ValueError
+        features = features[self.classifier.get_booster().feature_names]
+        score = self.classifier.predict_proba(features)
+        assert len(score) == 1, f"expected otuput of length 1; got length {len(score)}"
+        if len(score.flatten()) == 2:
+            score = score.flatten()[-1]
+        elif len(score) > 2:
+            raise ValueError
+        # if score is less than threshold, we drop it.
+        # This corresponds to class where a high score indicates "good"
+        # and a low score indicates "bad" (i.e. data we want to remove).
+        return score > self.threshold
 
 
 @dataclass
