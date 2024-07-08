@@ -60,7 +60,7 @@ def make_train_data():
         all_metadata = list(tqdm(pool.imap(_process_file, all_files), total=len(all_files)))
 
     df = pd.DataFrame(all_metadata)
-    df["quality"] = df["src_file"].apply(lambda f: int(f in low_quality_files))
+    df["quality"] = df["src_file"].apply(lambda f: int(f in high_quality_files))
     df.to_csv("table_quality_data.csv", index=False)
     return df
 
