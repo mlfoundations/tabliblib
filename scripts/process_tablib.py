@@ -43,8 +43,6 @@ import pandas as pd
 import psutil
 import pyarrow as pa
 import ray
-from xgboost import XGBClassifier
-
 from tabliblib import filters
 from tabliblib.config import PREPROCESS_VERSIONS
 from tabliblib.dataframe_utils import DataFrameFileDataSink
@@ -53,6 +51,7 @@ from tabliblib.filters import is_english
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 from tabliblib.summarizers import TableSummarizer
+from xgboost import XGBClassifier
 
 RANDOM_SEED = 2974
 
@@ -77,6 +76,9 @@ def main(
         read_mem_per_worker_gb: int = 16,
         write_mem_per_worker_gb: int = 32,
 ):
+    chunk_index = int(chunk_index)
+    chunk_size = int(chunk_size)
+
     assert config_version in PREPROCESS_VERSIONS.keys(), \
         f"invalid config version {config_version}; must be one of {PREPROCESS_VERSIONS.keys()}"
     data_dir = os.path.abspath(data_dir)
@@ -181,9 +183,9 @@ def main(
     print(f"[INFO] ds is {ds}")
 
     clf = XGBClassifier()
-    summarizer = TableSummarizer()
     print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
     clf.load_model(preprocess_config.table_quality_classifier)
+    summarizer = TableSummarizer()
 
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
