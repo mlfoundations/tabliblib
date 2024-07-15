@@ -100,6 +100,34 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                            table_quality_threshold=0.0055,
                            table_quality_classifier="xgb_quality_scorer.json"
                            ),
+    "v7.1": PreprocessConfig(max_null_like_frac=0.1,
+                             drop_extra_cols=True,
+                             drop_invalid_cols=True,
+                             pii_detect_filter_threshold=0.05,
+                             code_detect_filter_threshold=0.05,
+                             filter_rows_containing_pii=True,
+                             min_rows=64,
+                             filter_rows_containing_code=True,
+                             drop_duplicate_rows=True,
+                             max_frac_unnamed_columns=0.5,
+                             min_dtypes=None,
+                             table_quality_threshold=0.01,
+                             table_quality_classifier="xgb_quality_scorer.json"
+                             ),
+    "v7.2": PreprocessConfig(max_null_like_frac=0.1,
+                             drop_extra_cols=True,
+                             drop_invalid_cols=True,
+                             pii_detect_filter_threshold=0.05,
+                             code_detect_filter_threshold=0.05,
+                             filter_rows_containing_pii=True,
+                             min_rows=64,
+                             filter_rows_containing_code=True,
+                             drop_duplicate_rows=True,
+                             max_frac_unnamed_columns=0.5,
+                             min_dtypes=None,
+                             table_quality_threshold=0.02,
+                             table_quality_classifier="xgb_quality_scorer.json"
+                             ),
     # "Unfiltered" version of TabLib, except some filters
     # to ensure inputs do not exceed memory/disk limitations
     # and can fit into downstream context window.
