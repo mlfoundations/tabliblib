@@ -252,7 +252,6 @@ class TestTableFilterChain(unittest.TestCase):
             "1.456": [199, 299, 399],
             "-3.14": [199, 299, 399],
             "0000": [199, 299, 399],
-
         })
         clf = XGBClassifier()
         summarizer = TableSummarizer()
@@ -264,6 +263,13 @@ class TestTableFilterChain(unittest.TestCase):
             threshold=1e-10)
         table_filter_chain = TableFilterChain([quality_filter])
         self.assertTrue(table_filter_chain(df))
+
+        quality_filter = TableQualityFilter(
+            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
+            classifier=clf,
+            threshold=1 - 1e-10)
+        table_filter_chain = TableFilterChain([quality_filter])
+        self.assertFalse(table_filter_chain(df))
 
     def test_long_filter_chain(self):
         df = pd.DataFrame({
