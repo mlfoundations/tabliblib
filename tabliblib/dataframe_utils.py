@@ -126,11 +126,7 @@ class DataFrameFileDataSink:
 
     def _write_element(self, element):
         """
-        Helper function to write a batch of data to CSV files.
-
-        Parameters:
-        - batch: The batch of data to write.
-        - batch_index: The index of the batch.
+        Helper function to write a row of data to CSV file.
         """
         try:
             # Dispatch Ray tasks to write each element in the batch to a CSV file
