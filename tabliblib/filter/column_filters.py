@@ -26,8 +26,8 @@ class ColumnFilterChain(FilterChain):
     """A chain of ColumnFilters, applied sequentially."""
     _chain: List[ColumnFilter] = field(default_factory=list)
 
-    def append(self, filter: ColumnFilter):
-        self._chain.append(filter)
+    def append(self, flt: ColumnFilter):
+        self._chain.append(flt)
 
     def extend(self, filters: Sequence[ColumnFilter]) -> None:
         for flt in filters:
@@ -39,14 +39,11 @@ class ColumnFilterChain(FilterChain):
                  parse_arrow_bytes_from_dict: bool = True) -> Union[pd.DataFrame, None]:
         """Apply the filters to elem.
 
-        If False, this means the table should be excluded (the filters 'triggered').
-        If True, this means the table should be retrained (the filters did not 'trigger').
-
         Elem can be a DataFrame, a dictionary containing a DataFrame or Arrow bytes
         as a value under dict_key, or None (in which case the chain will return False).
         """
         if elem is None:
-            return False
+            return None
         if isinstance(elem, Dict):
             df = elem[dict_key]
             if parse_arrow_bytes_from_dict:

@@ -6,10 +6,11 @@ python -m unittest tabliblib/test_row_filters.py -v
 """
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from tabliblib.filter.row_filters import SubstringFilter, MaxValueLengthFilter, CodeRegexFilter, PIIRegexFilter, \
-    DuplicateRowsFilter
+    DuplicateRowsFilter, RowFilterChain
 from tabliblib.test_filters import CODE_SAMPLES, NON_CODE_SAMPLES, PII_SAMPLES, NON_PII_SAMPLES
 
 
@@ -124,3 +125,111 @@ class TestDuplicateRowsFilter(unittest.TestCase):
         row_filter = DuplicateRowsFilter()
         out = row_filter(df)
         pd.testing.assert_frame_equal(out, df)
+
+
+class TestRowFilterChain(unittest.TestCase):
+    def test_no_filter(self):
+        """Test that a filter chain does not modify a dataframe that does not trigger any filters."""
+        filter_chain = RowFilterChain([
+            MaxValueLengthFilter(1000),
+            SubstringFilter(["this", "that"]),
+            CodeRegexFilter(),
+            PIIRegexFilter(),
+            DuplicateRowsFilter(),
+        ])
+
+        df = pd.DataFrame({
+            "x": np.arange(10),
+            "y": np.arange(10, 20),
+        })
+
+        out = filter_chain(df)
+        pd.testing.assert_frame_equal(out, df)
+
+    def test_filter_length(self):
+        filter_chain = RowFilterChain([
+            MaxValueLengthFilter(10),
+            SubstringFilter(["this", "that"]),
+            CodeRegexFilter(),
+            PIIRegexFilter(),
+            DuplicateRowsFilter(),
+        ])
+
+        df = pd.DataFrame({
+            "x": np.arange(5),
+            "y": np.arange(5, 10),
+            "z": ["a" * 50, "b", "c", "d", "e"],
+        })
+
+        out = filter_chain(df)
+        pd.testing.assert_frame_equal(out, df.iloc[1:])
+
+    def test_filter_code(self):
+        """Test that RowFilterChain removes code."""
+        filter_chain = RowFilterChain([
+            MaxValueLengthFilter(1000),
+            SubstringFilter(["this", "that"]),
+            CodeRegexFilter(),
+            PIIRegexFilter(),
+            DuplicateRowsFilter(),
+        ])
+
+        df = pd.DataFrame({
+            "x": np.arange(5),
+            "y": np.arange(5, 10),
+            "z": [*CODE_SAMPLES[:2], *NON_CODE_SAMPLES[:3]],
+        })
+
+        out = filter_chain(df)
+        pd.testing.assert_frame_equal(out, df.iloc[2:])
+
+    def test_filter_pii(self):
+        """Test that RowFilterChain removes PII."""
+        filter_chain = RowFilterChain([
+            MaxValueLengthFilter(1000),
+            SubstringFilter(["this", "that"]),
+            CodeRegexFilter(),
+            PIIRegexFilter(),
+            DuplicateRowsFilter(),
+        ])
+
+        df = pd.DataFrame({
+            "x": np.arange(5),
+            "y": np.arange(5, 10),
+            "z": [*PII_SAMPLES[:3], *NON_PII_SAMPLES[:2]],
+        })
+
+        out = filter_chain(df)
+        pd.testing.assert_frame_equal(out, df.iloc[3:])
+
+    def test_filter_multi(self):
+        """Test that RowFilterChain removes rows when multiple filters are triggered."""
+        filter_chain = RowFilterChain([
+            CodeRegexFilter(),
+            PIIRegexFilter(),
+        ])
+
+        df = pd.DataFrame({
+            "w": [*NON_CODE_SAMPLES[:8], *CODE_SAMPLES[:2]],  # drops the last 2 samples
+            "x": np.arange(10),
+            "y": np.arange(10, 20),
+            "z": [*PII_SAMPLES[:5], *NON_PII_SAMPLES[:5]],  # drops the first 5 samples
+        })
+
+        out = filter_chain(df)
+        pd.testing.assert_frame_equal(out, df.iloc[5:-2])
+
+    def test_filter_all(self):
+        """Test that RowFilterChain removes rows when all rows are filtered."""
+        filter_chain = RowFilterChain([
+            SubstringFilter(["this", "that"]),
+            MaxValueLengthFilter(10),
+        ])
+
+        df = pd.DataFrame({
+            "x": ["this", "that", "another"],
+            "y": ["short", "short", "verylong" * 50]
+        })
+
+        out = filter_chain(df)
+        self.assertIsNone(out)
