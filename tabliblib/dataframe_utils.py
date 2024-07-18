@@ -8,7 +8,6 @@ import pyarrow as pa
 import ray
 
 from tabliblib.config import PreprocessConfig
-from tabliblib.filter.column_filters import ColumnFilterChain
 from tabliblib.filter.row_filters import RowFilterChain
 from tabliblib.io import read_arrow_bytes
 
@@ -18,8 +17,6 @@ def write_dataframe_to_file(row: Dict[str, Any],
                             root_dir: str,
                             output_format: str,
                             config: PreprocessConfig,
-                            column_filter_chain: ColumnFilterChain,
-                            row_filter_chain: RowFilterChain,
                             ):
     """
     A Ray remote function that writes a DataFrame to a CSV file.
@@ -34,22 +31,14 @@ def write_dataframe_to_file(row: Dict[str, Any],
 
     # Generate a unique filename for each DataFrame
     df_uuid = str(uuid.uuid1())
-    if "df" not in row:
-        # At this point, DataFrames should be valid; we want to raise an error if this is not the case
-        # because this would mean the filtering is not right.
+    arrow_bytes = row["arrow_bytes"]
+    if arrow_bytes is not None:
         df = read_arrow_bytes(row["arrow_bytes"], raise_on_error=True)
     else:
-        df = row["df"]
+        return row
 
     output_file = "__".join((str(row["content_hash"]), df_uuid)) + "." + output_format
     filename = os.path.join(os.path.abspath(root_dir), output_file)
-
-    df = column_filter_chain(df)
-    df = row_filter_chain(df)
-
-    if df is None or not len(df):
-        logging.warning("dataframe is empty after applying row filters")
-        return row
 
     # TODO(jpgard): seems like this should be a TableFilter
     if config.min_rows is not None and len(df) < config.min_rows:
@@ -78,8 +67,6 @@ class DataFrameFileDataSink:
     output_format: str
     mem_per_writer: int
     config: PreprocessConfig
-    column_filter_chain: ColumnFilterChain
-    row_filter_chain: RowFilterChain
     num_cpus_per_writer: int = 1
 
     def write(self, dataset):
@@ -103,9 +90,7 @@ class DataFrameFileDataSink:
                                memory=self.mem_per_writer)
                       .remote(element, self.base_path,
                               self.output_format,
-                              config=self.config,
-                              column_filter_chain=self.column_filter_chain,
-                              row_filter_chain=self.row_filter_chain))
+                              config=self.config))
 
             # Wait for all tasks to complete and return their filenames
             return ray.get(future)

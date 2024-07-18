@@ -36,7 +36,7 @@ import os
 import random
 import time
 from functools import partial
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 import fire
 import pandas as pd
@@ -54,6 +54,7 @@ from tabliblib.filter.row_filters import RowFilterChain, MaxValueLengthFilter, S
     PIIRegexFilter, DuplicateRowsFilter
 from tabliblib.filter.table_filters import TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, \
     TableQualityFilter, PIIDetectionFilter, CodeDetectionFilter, SchemaFilter, ValidColumnCountFilter
+from tabliblib.io import read_arrow_bytes, write_arrow_bytes
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 from tabliblib.summarizers import TableSummarizer
@@ -242,12 +243,36 @@ def main(
     if preprocess_config.drop_duplicate_rows:
         row_filter_chain.append(DuplicateRowsFilter())
 
+    def _column_filter_map_fn(row: Dict[str, Any]):
+        # At this point, DataFrames should be valid; we want to raise an error if this is not the case
+        # because this would mean the filtering is not right.
+        df = read_arrow_bytes(row["arrow_bytes"], raise_on_error=True)
+        df_out = column_filter_chain(df)
+        if df_out is not None and len(df_out):
+            row["arrow_bytes"] = write_arrow_bytes(df_out)
+        else:
+            row["arrow_bytes"] = None
+        return row
+
+    def _row_filter_map_fn(row: Dict[str, Any]):
+        # At this point, DataFrames should be valid; we want to raise an error if this is not the case
+        # because this would mean the filtering is not right.
+        df = read_arrow_bytes(row["arrow_bytes"], raise_on_error=True)
+        df_out = row_filter_chain(df)
+        if df_out is not None and len(df_out):
+            row["arrow_bytes"] = write_arrow_bytes(df_out)
+        else:
+            row["arrow_bytes"] = None
+        return row
+
     # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the
     #  dataframe one time.
     _english_filter = partial(is_english, threshold=preprocess_config.langdetect_threshold)
-    ds = ds \
-        .filter(_english_filter) \
-        .filter(table_filter_chain)
+    ds = (ds
+          .filter(_english_filter)
+          .filter(table_filter_chain)
+          .map(_column_filter_map_fn)
+          .map(_row_filter_map_fn))
 
     # Allocate more resources to writing; this requires more memory bc arrow bytes are expanded
     #  into a pandas dataframe.
@@ -256,8 +281,7 @@ def main(
         output_format="parquet",
         config=preprocess_config,
         mem_per_writer=write_mem_per_worker_gb if write_mem_per_worker_gb else 2 * read_mem_per_worker_gb,
-        column_filter_chain=column_filter_chain,
-        row_filter_chain=row_filter_chain)
+    )
     # Write the dataset to CSV files
     result = data_frame_sink.write(ds)
 
