@@ -59,8 +59,6 @@ def write_dataframe_to_file(row: Dict[str, Any],
     # TODO(jpgard): seems like this should be a TableFilter
     if config.drop_extra_rows and len(df) > config.max_output_rows:
         df = df.sample(n=config.max_output_rows, replace=False)
-        if not len(df):
-            return row
 
     logging.warning(f"[DEBUG] writing dataframe of shape {df.shape} to {filename}")
     # Write DataFrame to CSV
