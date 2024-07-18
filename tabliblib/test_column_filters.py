@@ -67,6 +67,12 @@ class TestColumnFilterChain(unittest.TestCase):
         out = filter_chain(self.df)
         pd.testing.assert_frame_equal(self.df, out)
 
+    def test_empty_filter_chain(self):
+        """Test that an empty filter chain does not modify the input DataFrame."""
+        filter_chain = ColumnFilterChain([])
+        out = filter_chain(self.df)
+        pd.testing.assert_frame_equal(self.df, out)
+
     def test_filter_chain_drops_long_header(self):
         filter_chain = ColumnFilterChain([
             InvalidColumnsFilter(max_header_len_chars=7,
