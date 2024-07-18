@@ -6,7 +6,7 @@ from typing import Callable, Any, Union, Sequence
 import pandas as pd
 
 from tabliblib.filter import Filter, FilterChain
-from tabliblib.filter.filter_utils import is_string_column
+from tabliblib.filter.filter_utils import is_string_column, contains_code, contains_pii
 
 
 @dataclass
@@ -100,6 +100,34 @@ class SubstringFilter(RowFilter):
         return self._apply_row_based_filter(df,
                                             _contains_substring_filter_fn,
                                             string_columns_only=self.string_columns_only)
+
+
+@dataclass
+class CodeRegexFilter(RowFilter):
+    """Drop rows with cell values that match a regular expression designed to detect code.
+
+    Only string columns are evaluated."""
+
+    def __call__(self, df: pd.DataFrame) -> Union[pd.DataFrame, None]:
+        return self._apply_row_based_filter(df, filter_fn=contains_code,
+                                            string_columns_only=True)
+
+
+@dataclass
+class PIIRegexFilter(RowFilter):
+    """Drop rows with cell values that match a regular expression designed to detect PII.
+
+        Only string columns are evaluated."""
+
+    def __call__(self, df: pd.DataFrame) -> Union[pd.DataFrame, None]:
+        return self._apply_row_based_filter(df, filter_fn=contains_pii,
+                                            string_columns_only=True)
+
+
+@dataclass
+class DuplicateRowsFilter(RowFilter):
+    def __call__(self, df: pd.DataFrame) -> Union[pd.DataFrame, None]:
+        return df.drop_duplicates()
 
 
 def apply_row_based_filter(df: pd.DataFrame, filter_fn: Callable[[Any], bool],

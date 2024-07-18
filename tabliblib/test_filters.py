@@ -66,6 +66,8 @@ NON_PII_SAMPLES = [
     "1234567890",  # do not match general 10-digit numbers
     "text with @ symbol",
     "not@home",
+    "@twitterhandle",
+    "text @ home",
 ]
 
 

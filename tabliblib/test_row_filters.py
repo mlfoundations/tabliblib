@@ -8,7 +8,9 @@ import unittest
 
 import pandas as pd
 
-from tabliblib.filter.row_filters import SubstringFilter, MaxValueLengthFilter
+from tabliblib.filter.row_filters import SubstringFilter, MaxValueLengthFilter, CodeRegexFilter, PIIRegexFilter, \
+    DuplicateRowsFilter
+from tabliblib.test_filters import CODE_SAMPLES, NON_CODE_SAMPLES, PII_SAMPLES, NON_PII_SAMPLES
 
 
 class TestMaxValueLengthFilter(unittest.TestCase):
@@ -59,3 +61,66 @@ class TestSubstringFilter(unittest.TestCase):
         row_filter = SubstringFilter(substrings=["nothing"])
         out = row_filter(self.df)
         pd.testing.assert_frame_equal(self.df, out)
+
+
+class TestCodeRegexFilter(unittest.TestCase):
+
+    def test_code_regex_filter(self):
+        df = pd.DataFrame(
+            {"x": [1, 2, 3, 4],
+             "y": [CODE_SAMPLES[1], CODE_SAMPLES[0], NON_CODE_SAMPLES[2], NON_CODE_SAMPLES[1]],
+             })
+        row_filter = CodeRegexFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df.iloc[2:])
+
+    def test_code_regex_nofilter(self):
+        """Test code regex filter does not exclude rows with no code."""
+        df = pd.DataFrame(
+            {"x": [1, 2, 3, 4],
+             "y": [NON_CODE_SAMPLES[1], NON_CODE_SAMPLES[0], NON_CODE_SAMPLES[2], NON_CODE_SAMPLES[1]],
+             })
+        row_filter = CodeRegexFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df)
+
+
+class TestPIIRegexFilter(unittest.TestCase):
+    def test_pii_regex_filter(self):
+        df = pd.DataFrame({
+            "x": [1, 2, 3, 4, 5],
+            "y": [NON_PII_SAMPLES[1], NON_PII_SAMPLES[2], PII_SAMPLES[0], PII_SAMPLES[1], PII_SAMPLES[2]]
+        })
+        row_filter = PIIRegexFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df[:2])
+
+    def test_pii_regex_nofilter(self):
+        df = pd.DataFrame({
+            "x": [1, 2, 3, 4, 5],
+            "y": [NON_PII_SAMPLES[1], NON_PII_SAMPLES[2], NON_PII_SAMPLES[3], NON_PII_SAMPLES[4], NON_PII_SAMPLES[5]]
+        })
+        row_filter = PIIRegexFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df)
+
+
+class TestDuplicateRowsFilter(unittest.TestCase):
+    def test_duplicate_rows_filter(self):
+        df = pd.DataFrame({
+            "x": [1, 2, 3, 4, 5, 5, 5],
+            "y": ["a", "b", "c", "d", "e", "e", "e"]
+        })
+        row_filter = DuplicateRowsFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df.iloc[:5])
+
+    def test_duplicate_rows_nofilter(self):
+        """Test duplicate row filter does not modify DataFrame with no duplicates."""
+        df = pd.DataFrame({
+            "x": [1, 2, 3, 4, 5, ],
+            "y": ["a", "b", "c", "d", "e", ]
+        })
+        row_filter = DuplicateRowsFilter()
+        out = row_filter(df)
+        pd.testing.assert_frame_equal(out, df)

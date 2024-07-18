@@ -69,25 +69,30 @@ def write_dataframe_to_file(row: Dict[str, Any],
             logging.warning("dataframe is empty after applying config.filter_rows_containing_substrings")
             return row
 
+    # CodeRegexFilter
     if config.filter_rows_containing_code:
         df = apply_row_based_filter(df, contains_code, string_columns_only=True)
         if not len(df):
             logging.warning("dataframe is empty after applying config.filter_rows_containing_code")
             return row
 
+    # PIIRegexFilter
     if config.filter_rows_containing_pii:
         df = apply_row_based_filter(df, contains_pii, string_columns_only=True)
         if not len(df):
             logging.warning("dataframe is empty after applying config.filter_rows_containing_pii")
             return row
 
+    # DuplicateRowsFilter
     if config.drop_duplicate_rows:
         df = df.drop_duplicates()
 
+    # TODO(jpgard): seems like this should be a TableFilter
     if config.min_rows is not None and len(df) < config.min_rows:
         logging.warning(f"dataframe contains {len(df)} rows after filtering; dropping")
         return row
 
+    # TODO(jpgard): seems like this should be a TableFilter
     if config.drop_extra_rows and len(df) > config.max_output_rows:
         df = df.sample(n=config.max_output_rows, replace=False)
         if not len(df):
