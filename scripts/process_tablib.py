@@ -9,10 +9,10 @@ Make sure to start the ray head node first with `ray start --head `. Then:
 # local test
 python scripts/process_tablib.py \
     --data_dir "sample-shards/tablib-v1-sample-tiny/" \
-    --output_dir ./tmp/tablib_processed/v1-sample-tiny/ \
+    --config_version v7 \
+    --output_dir ./tmp/tablib_processed/v7/ \
     --read_mem_per_worker_gb 2 \
-    --dedup_dir ./tmp/tablib_processed/dedup/ \
-    --config_version v6
+    --dedup_dir ./tmp/tablib_processed/dedup/
 
 
 # run on hyak on full dataset
@@ -43,11 +43,12 @@ import pandas as pd
 import psutil
 import pyarrow as pa
 import ray
-from tabliblib import filters
+
+import tabliblib.filter.table_filters
 from tabliblib.config import PREPROCESS_VERSIONS
 from tabliblib.dataframe_utils import DataFrameFileDataSink
 from tabliblib.dedup_utils import path_to_str
-from tabliblib.filters import is_english
+from tabliblib.filter.filter_utils import is_english
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 from tabliblib.summarizers import TableSummarizer
@@ -190,24 +191,23 @@ def main(
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
-    table_filter_chain = filters.TableFilterChain([
-        filters.RowCountFilter(min_rows=preprocess_config.min_rows),
-        filters.ColumnCountFilter(min_columns=preprocess_config.min_cols,
-                                  max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
-        filters.BadHeadersFilter(max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
-                                 max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
-        filters.SchemaFilter(preprocess_config.min_dtypes),
-        filters.ValidColumnCountFilter(max_header_len_chars=preprocess_config.max_header_len_chars,
-                                       min_unique_column_values=preprocess_config.min_unique_column_values,
-                                       max_null_like_frac=preprocess_config.max_null_like_frac,
-                                       min_cols=preprocess_config.min_cols),
-        filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
-        filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
-        filters.TableQualityFilter(
+    table_filter_chain = tabliblib.filter.table_filters.TableFilterChain([
+        tabliblib.filter.table_filters.RowCountFilter(min_rows=preprocess_config.min_rows),
+        tabliblib.filter.table_filters.ColumnCountFilter(min_columns=preprocess_config.min_cols,
+                                                         max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
+        tabliblib.filter.table_filters.BadHeadersFilter(max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
+                                                        max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
+        tabliblib.filter.table_filters.SchemaFilter(preprocess_config.min_dtypes),
+        tabliblib.filter.table_filters.ValidColumnCountFilter(max_header_len_chars=preprocess_config.max_header_len_chars,
+                                                              min_unique_column_values=preprocess_config.min_unique_column_values,
+                                                              max_null_like_frac=preprocess_config.max_null_like_frac,
+                                                              min_cols=preprocess_config.min_cols),
+        tabliblib.filter.table_filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
+        tabliblib.filter.table_filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
+        tabliblib.filter.table_filters.TableQualityFilter(
             feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
             classifier=clf,
             threshold=preprocess_config.table_quality_threshold),
-
     ])
 
     # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the

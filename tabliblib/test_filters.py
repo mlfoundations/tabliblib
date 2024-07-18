@@ -12,8 +12,9 @@ import pandas as pd
 from xgboost import XGBClassifier
 
 from tabliblib.summarizers import TableSummarizer
-from tabliblib.filters import contains_pii, contains_code, compute_frac_null_like, is_kv_header, \
-    compute_frac_contains_code, apply_row_based_filter, compute_frac_numeric_colnames
+from tabliblib.filter.filter_utils import contains_code, contains_pii, is_kv_header, compute_frac_numeric_colnames, \
+    compute_frac_null_like, compute_frac_contains_code
+from tabliblib.filter.row_filters import apply_row_based_filter
 
 
 def generate_random_words() -> List[str]:
@@ -206,9 +207,8 @@ class TestFilters(unittest.TestCase):
             self.assertFalse(is_kv_header(non_kv_header))
 
 
-from tabliblib.filters import (TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, SchemaFilter,
-                               ValidColumnCountFilter, CodeDetectionFilter, PIIDetectionFilter,
-                               TableQualityFilter)
+from tabliblib.filter.table_filters import TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, \
+    SchemaFilter, ValidColumnCountFilter, CodeDetectionFilter, TableQualityFilter, PIIDetectionFilter
 from tabliblib.io import write_arrow_bytes
 
 

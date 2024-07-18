@@ -8,7 +8,8 @@ import pyarrow as pa
 import ray
 
 from tabliblib.config import PreprocessConfig
-from tabliblib.filters import fetch_names_of_valid_columns, apply_row_based_filter, contains_code, contains_pii
+from tabliblib.filter.filter_utils import contains_code, contains_pii, fetch_names_of_valid_columns
+from tabliblib.filter.row_filters import apply_row_based_filter
 from tabliblib.io import read_arrow_bytes, sample_columns_if_needed
 
 
@@ -39,6 +40,7 @@ def write_dataframe_to_file(row: Dict[str, Any], root_dir: str, output_format: s
     output_file = "__".join((str(row["content_hash"]), df_uuid)) + "." + output_format
     filename = os.path.join(os.path.abspath(root_dir), output_file)
 
+    # InvalidColumnsFilter
     if config.drop_invalid_cols:
         valid_colnames = fetch_names_of_valid_columns(df,
                                                       max_header_len_chars=config.max_header_len_chars,
@@ -46,6 +48,7 @@ def write_dataframe_to_file(row: Dict[str, Any], root_dir: str, output_format: s
                                                       max_null_like_frac=config.max_null_like_frac)
         df = df[valid_colnames]
 
+    # MaxColumnsFilter
     if config.drop_extra_cols:
         df = sample_columns_if_needed(df, max_cols=config.max_cols)
 
