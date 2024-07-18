@@ -10,7 +10,7 @@ Make sure to start the ray head node first with `ray start --head `. Then:
 python scripts/process_tablib.py \
     --data_dir "sample-shards/tablib-v1-sample-tiny/" \
     --config_version v7 \
-    --output_dir ./tmp/tablib_processed/v7/ \
+    --output_dir ./tmp/tablib_processed/v7v2/ \
     --read_mem_per_worker_gb 2 \
     --dedup_dir ./tmp/tablib_processed/dedup/
 
@@ -45,12 +45,15 @@ import pyarrow as pa
 import ray
 from xgboost import XGBClassifier
 
-import tabliblib.filter.column_filters
-import tabliblib.filter.table_filters
 from tabliblib.config import PREPROCESS_VERSIONS
 from tabliblib.dataframe_utils import DataFrameFileDataSink
 from tabliblib.dedup_utils import path_to_str
+from tabliblib.filter.column_filters import ColumnFilterChain, MaxColumnsFilter, InvalidColumnsFilter
 from tabliblib.filter.filter_utils import is_english
+from tabliblib.filter.row_filters import RowFilterChain, MaxValueLengthFilter, SubstringFilter, CodeRegexFilter, \
+    PIIRegexFilter, DuplicateRowsFilter
+from tabliblib.filter.table_filters import TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, \
+    TableQualityFilter, PIIDetectionFilter, CodeDetectionFilter, SchemaFilter, ValidColumnCountFilter
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 from tabliblib.summarizers import TableSummarizer
@@ -192,31 +195,31 @@ def main(
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
-    table_filter_chain = tabliblib.filter.table_filters.TableFilterChain([
-        tabliblib.filter.table_filters.RowCountFilter(min_rows=preprocess_config.min_rows),
-        tabliblib.filter.table_filters.ColumnCountFilter(min_columns=preprocess_config.min_cols,
-                                                         max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
-        tabliblib.filter.table_filters.BadHeadersFilter(
+    table_filter_chain = TableFilterChain([
+        RowCountFilter(min_rows=preprocess_config.min_rows),
+        ColumnCountFilter(min_columns=preprocess_config.min_cols,
+                          max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
+        BadHeadersFilter(
             max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
             max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
-        tabliblib.filter.table_filters.SchemaFilter(preprocess_config.min_dtypes),
-        tabliblib.filter.table_filters.ValidColumnCountFilter(
+        SchemaFilter(preprocess_config.min_dtypes),
+        ValidColumnCountFilter(
             max_header_len_chars=preprocess_config.max_header_len_chars,
             min_unique_column_values=preprocess_config.min_unique_column_values,
             max_null_like_frac=preprocess_config.max_null_like_frac,
             min_cols=preprocess_config.min_cols),
-        tabliblib.filter.table_filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
-        tabliblib.filter.table_filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
-        tabliblib.filter.table_filters.TableQualityFilter(
+        CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
+        PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
+        TableQualityFilter(
             feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
             classifier=clf,
             threshold=preprocess_config.table_quality_threshold),
     ])
 
-    column_filter_chain = tabliblib.filter.column_filters.ColumnFilterChain()
+    column_filter_chain = ColumnFilterChain()
     if preprocess_config.drop_invalid_cols:
         column_filter_chain.append(
-            tabliblib.filter.column_filters.InvalidColumnsFilter(
+            InvalidColumnsFilter(
                 max_header_len_chars=preprocess_config.max_header_len_chars,
                 min_unique_column_values=preprocess_config.min_unique_column_values,
                 max_null_like_frac=preprocess_config.max_null_like_frac
@@ -224,8 +227,20 @@ def main(
         )
     if preprocess_config.drop_extra_cols:
         column_filter_chain.append(
-            tabliblib.filter.column_filters.MaxColumnsFilter(preprocess_config.max_cols)
+            MaxColumnsFilter(preprocess_config.max_cols)
         )
+
+    row_filter_chain = RowFilterChain()
+    if preprocess_config.max_value_len_chars:
+        row_filter_chain.append(MaxValueLengthFilter(preprocess_config.max_value_len_chars))
+    if preprocess_config.filter_rows_containing_substrings:
+        row_filter_chain.append(SubstringFilter(preprocess_config.filter_rows_containing_substrings))
+    if preprocess_config.filter_rows_containing_code:
+        row_filter_chain.append(CodeRegexFilter())
+    if preprocess_config.filter_rows_containing_pii:
+        row_filter_chain.append(PIIRegexFilter())
+    if preprocess_config.drop_duplicate_rows:
+        row_filter_chain.append(DuplicateRowsFilter())
 
     # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the
     #  dataframe one time.
@@ -241,7 +256,8 @@ def main(
         output_format="parquet",
         config=preprocess_config,
         mem_per_writer=write_mem_per_worker_gb if write_mem_per_worker_gb else 2 * read_mem_per_worker_gb,
-    column_filter_chain=column_filter_chain)
+        column_filter_chain=column_filter_chain,
+        row_filter_chain=row_filter_chain)
     # Write the dataset to CSV files
     result = data_frame_sink.write(ds)
 

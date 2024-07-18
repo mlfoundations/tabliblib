@@ -9,8 +9,7 @@ import ray
 
 from tabliblib.config import PreprocessConfig
 from tabliblib.filter.column_filters import ColumnFilterChain
-from tabliblib.filter.filter_utils import contains_code, contains_pii
-from tabliblib.filter.row_filters import apply_row_based_filter
+from tabliblib.filter.row_filters import RowFilterChain
 from tabliblib.io import read_arrow_bytes
 
 
@@ -20,6 +19,7 @@ def write_dataframe_to_file(row: Dict[str, Any],
                             output_format: str,
                             config: PreprocessConfig,
                             column_filter_chain: ColumnFilterChain,
+                            row_filter_chain: RowFilterChain,
                             ):
     """
     A Ray remote function that writes a DataFrame to a CSV file.
@@ -45,47 +45,11 @@ def write_dataframe_to_file(row: Dict[str, Any],
     filename = os.path.join(os.path.abspath(root_dir), output_file)
 
     df = column_filter_chain(df)
+    df = row_filter_chain(df)
 
-    # MaxValueLengthFilter
-    if config.max_value_len_chars:
-        assert config.max_value_len_chars is not None
-        df = apply_row_based_filter(df, filter_fn=lambda x: len(str(x)) > config.max_value_len_chars,
-                                    string_columns_only=True)
-        if not len(df):
-            logging.warning("dataframe is empty after applying config.max_value_len_chars")
-            return row
-
-    # SubstringFilter
-    if config.filter_rows_containing_substrings:
-        def _contains_substring_filter_fn(x) -> bool:
-            """Helper function to check if x contains substring. Returns False if x is not castable to string."""
-            try:
-                return any(substr in str(x) for substr in config.filter_rows_containing_substrings)
-            except:
-                return False
-
-        df = apply_row_based_filter(df, filter_fn=_contains_substring_filter_fn, string_columns_only=True)
-        if not len(df):
-            logging.warning("dataframe is empty after applying config.filter_rows_containing_substrings")
-            return row
-
-    # CodeRegexFilter
-    if config.filter_rows_containing_code:
-        df = apply_row_based_filter(df, contains_code, string_columns_only=True)
-        if not len(df):
-            logging.warning("dataframe is empty after applying config.filter_rows_containing_code")
-            return row
-
-    # PIIRegexFilter
-    if config.filter_rows_containing_pii:
-        df = apply_row_based_filter(df, contains_pii, string_columns_only=True)
-        if not len(df):
-            logging.warning("dataframe is empty after applying config.filter_rows_containing_pii")
-            return row
-
-    # DuplicateRowsFilter
-    if config.drop_duplicate_rows:
-        df = df.drop_duplicates()
+    if df is None or not len(df):
+        logging.warning("dataframe is empty after applying row filters")
+        return row
 
     # TODO(jpgard): seems like this should be a TableFilter
     if config.min_rows is not None and len(df) < config.min_rows:
@@ -117,6 +81,7 @@ class DataFrameFileDataSink:
     mem_per_writer: int
     config: PreprocessConfig
     column_filter_chain: ColumnFilterChain
+    row_filter_chain: RowFilterChain
     num_cpus_per_writer: int = 1
 
     def write(self, dataset):
@@ -141,7 +106,8 @@ class DataFrameFileDataSink:
                       .remote(element, self.base_path,
                               self.output_format,
                               config=self.config,
-                              column_filter_chain=self.column_filter_chain))
+                              column_filter_chain=self.column_filter_chain,
+                              row_filter_chain=self.row_filter_chain))
 
             # Wait for all tasks to complete and return their filenames
             return ray.get(future)
