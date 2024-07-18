@@ -46,6 +46,7 @@ def write_dataframe_to_file(row: Dict[str, Any],
 
     df = column_filter_chain(df)
 
+    # MaxValueLengthFilter
     if config.max_value_len_chars:
         assert config.max_value_len_chars is not None
         df = apply_row_based_filter(df, filter_fn=lambda x: len(str(x)) > config.max_value_len_chars,
@@ -54,6 +55,7 @@ def write_dataframe_to_file(row: Dict[str, Any],
             logging.warning("dataframe is empty after applying config.max_value_len_chars")
             return row
 
+    # SubstringFilter
     if config.filter_rows_containing_substrings:
         def _contains_substring_filter_fn(x) -> bool:
             """Helper function to check if x contains substring. Returns False if x is not castable to string."""
