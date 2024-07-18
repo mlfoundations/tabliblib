@@ -43,7 +43,9 @@ import pandas as pd
 import psutil
 import pyarrow as pa
 import ray
+from xgboost import XGBClassifier
 
+import tabliblib.filter.column_filters
 import tabliblib.filter.table_filters
 from tabliblib.config import PREPROCESS_VERSIONS
 from tabliblib.dataframe_utils import DataFrameFileDataSink
@@ -52,7 +54,6 @@ from tabliblib.filter.filter_utils import is_english
 from tabliblib.mappers import add_dataframe_summary_info, detect_language
 from tabliblib.ray_utils import start_ray
 from tabliblib.summarizers import TableSummarizer
-from xgboost import XGBClassifier
 
 RANDOM_SEED = 2974
 
@@ -195,13 +196,15 @@ def main(
         tabliblib.filter.table_filters.RowCountFilter(min_rows=preprocess_config.min_rows),
         tabliblib.filter.table_filters.ColumnCountFilter(min_columns=preprocess_config.min_cols,
                                                          max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
-        tabliblib.filter.table_filters.BadHeadersFilter(max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
-                                                        max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
+        tabliblib.filter.table_filters.BadHeadersFilter(
+            max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
+            max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
         tabliblib.filter.table_filters.SchemaFilter(preprocess_config.min_dtypes),
-        tabliblib.filter.table_filters.ValidColumnCountFilter(max_header_len_chars=preprocess_config.max_header_len_chars,
-                                                              min_unique_column_values=preprocess_config.min_unique_column_values,
-                                                              max_null_like_frac=preprocess_config.max_null_like_frac,
-                                                              min_cols=preprocess_config.min_cols),
+        tabliblib.filter.table_filters.ValidColumnCountFilter(
+            max_header_len_chars=preprocess_config.max_header_len_chars,
+            min_unique_column_values=preprocess_config.min_unique_column_values,
+            max_null_like_frac=preprocess_config.max_null_like_frac,
+            min_cols=preprocess_config.min_cols),
         tabliblib.filter.table_filters.CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
         tabliblib.filter.table_filters.PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
         tabliblib.filter.table_filters.TableQualityFilter(
@@ -209,6 +212,20 @@ def main(
             classifier=clf,
             threshold=preprocess_config.table_quality_threshold),
     ])
+
+    column_filter_chain = tabliblib.filter.column_filters.ColumnFilterChain()
+    if preprocess_config.drop_invalid_cols:
+        column_filter_chain.append(
+            tabliblib.filter.column_filters.InvalidColumnsFilter(
+                max_header_len_chars=preprocess_config.max_header_len_chars,
+                min_unique_column_values=preprocess_config.min_unique_column_values,
+                max_null_like_frac=preprocess_config.max_null_like_frac
+            )
+        )
+    if preprocess_config.drop_extra_cols:
+        column_filter_chain.append(
+            tabliblib.filter.column_filters.MaxColumnsFilter(preprocess_config.max_cols)
+        )
 
     # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the
     #  dataframe one time.
@@ -223,7 +240,8 @@ def main(
         output_dir,
         output_format="parquet",
         config=preprocess_config,
-        mem_per_writer=write_mem_per_worker_gb if write_mem_per_worker_gb else 2 * read_mem_per_worker_gb)
+        mem_per_writer=write_mem_per_worker_gb if write_mem_per_worker_gb else 2 * read_mem_per_worker_gb,
+    column_filter_chain=column_filter_chain)
     # Write the dataset to CSV files
     result = data_frame_sink.write(ds)
 

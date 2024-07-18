@@ -8,14 +8,18 @@ import pyarrow as pa
 import ray
 
 from tabliblib.config import PreprocessConfig
-from tabliblib.filter.filter_utils import contains_code, contains_pii, fetch_names_of_valid_columns
+from tabliblib.filter.column_filters import ColumnFilterChain
+from tabliblib.filter.filter_utils import contains_code, contains_pii
 from tabliblib.filter.row_filters import apply_row_based_filter
-from tabliblib.io import read_arrow_bytes, sample_columns_if_needed
+from tabliblib.io import read_arrow_bytes
 
 
 @ray.remote
-def write_dataframe_to_file(row: Dict[str, Any], root_dir: str, output_format: str,
+def write_dataframe_to_file(row: Dict[str, Any],
+                            root_dir: str,
+                            output_format: str,
                             config: PreprocessConfig,
+                            column_filter_chain: ColumnFilterChain,
                             ):
     """
     A Ray remote function that writes a DataFrame to a CSV file.
@@ -40,17 +44,7 @@ def write_dataframe_to_file(row: Dict[str, Any], root_dir: str, output_format: s
     output_file = "__".join((str(row["content_hash"]), df_uuid)) + "." + output_format
     filename = os.path.join(os.path.abspath(root_dir), output_file)
 
-    # InvalidColumnsFilter
-    if config.drop_invalid_cols:
-        valid_colnames = fetch_names_of_valid_columns(df,
-                                                      max_header_len_chars=config.max_header_len_chars,
-                                                      min_unique_column_values=config.min_unique_column_values,
-                                                      max_null_like_frac=config.max_null_like_frac)
-        df = df[valid_colnames]
-
-    # MaxColumnsFilter
-    if config.drop_extra_cols:
-        df = sample_columns_if_needed(df, max_cols=config.max_cols)
+    df = column_filter_chain(df)
 
     if config.max_value_len_chars:
         assert config.max_value_len_chars is not None
@@ -115,6 +109,7 @@ class DataFrameFileDataSink:
     output_format: str
     mem_per_writer: int
     config: PreprocessConfig
+    column_filter_chain: ColumnFilterChain
     num_cpus_per_writer: int = 1
 
     def write(self, dataset):
@@ -138,7 +133,8 @@ class DataFrameFileDataSink:
                                memory=self.mem_per_writer)
                       .remote(element, self.base_path,
                               self.output_format,
-                              config=self.config))
+                              config=self.config,
+                              column_filter_chain=self.column_filter_chain))
 
             # Wait for all tasks to complete and return their filenames
             return ray.get(future)
