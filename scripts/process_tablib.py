@@ -64,14 +64,9 @@ RANDOM_SEED = 2974
 BYTES_PER_GB = 1024 * 1024 * 1024
 
 
-def make_table_filter_chain(preprocess_config: PreprocessConfig) -> TableFilterChain:
-    summarizer = TableSummarizer()
-
-    clf = XGBClassifier()
-    print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
-    clf.load_model(preprocess_config.table_quality_classifier)
-
-    return TableFilterChain([
+def make_table_filter_chain(preprocess_config: PreprocessConfig,
+                            table_quality_filter: Optional[TableQualityFilter] = None) -> TableFilterChain:
+    filter_chain = TableFilterChain([
         RowCountFilter(min_rows=preprocess_config.min_rows),
         ColumnCountFilter(min_columns=preprocess_config.min_cols,
                           max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
@@ -86,11 +81,12 @@ def make_table_filter_chain(preprocess_config: PreprocessConfig) -> TableFilterC
             min_cols=preprocess_config.min_cols),
         CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
         PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
-        TableQualityFilter(
-            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
-            classifier=clf,
-            threshold=preprocess_config.table_quality_threshold),
+
     ])
+    if preprocess_config.table_quality_classifier_position == "pre":
+        assert table_quality_filter is not None
+        filter_chain.append(table_quality_filter)
+    return filter_chain
 
 
 def make_column_filter_chain(preprocess_config: PreprocessConfig) -> ColumnFilterChain:
@@ -254,11 +250,24 @@ def main(
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
-    table_filter_chain_pre = make_table_filter_chain(preprocess_config)
+    if preprocess_config.table_quality_classifier:
+        summarizer = TableSummarizer()
+        clf = XGBClassifier()
+        print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
+        clf.load_model(preprocess_config.table_quality_classifier)
+        table_quality_filter = TableQualityFilter(
+            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
+            classifier=clf,
+            threshold=preprocess_config.table_quality_threshold)
+    else:
+        table_quality_filter = None
 
-    # TODO(jpgard): add an option to apply the TableQualityFilter here instead.
+    table_filter_chain_pre = make_table_filter_chain(preprocess_config, table_quality_filter=table_quality_filter)
+
     table_filter_chain_post = TableFilterChain([
         RowCountFilter(min_rows=preprocess_config.min_rows)])
+    if preprocess_config.table_quality_classifier_position == "post":
+        table_filter_chain_post.append(table_quality_filter)
 
     column_filter_chain = make_column_filter_chain(preprocess_config)
 
