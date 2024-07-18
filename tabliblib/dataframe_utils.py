@@ -7,8 +7,6 @@ from typing import Dict, Any
 import pyarrow as pa
 import ray
 
-from tabliblib.config import PreprocessConfig
-from tabliblib.filter.row_filters import RowFilterChain
 from tabliblib.io import read_arrow_bytes
 
 
@@ -16,8 +14,7 @@ from tabliblib.io import read_arrow_bytes
 def write_dataframe_to_file(row: Dict[str, Any],
                             root_dir: str,
                             output_format: str,
-                            config: PreprocessConfig,
-                            ):
+                            ) -> Dict[str, Any]:
     """
     A Ray remote function that writes a DataFrame to a CSV file.
 
@@ -40,15 +37,6 @@ def write_dataframe_to_file(row: Dict[str, Any],
     output_file = "__".join((str(row["content_hash"]), df_uuid)) + "." + output_format
     filename = os.path.join(os.path.abspath(root_dir), output_file)
 
-    # TODO(jpgard): seems like this should be a TableFilter
-    if config.min_rows is not None and len(df) < config.min_rows:
-        logging.warning(f"dataframe contains {len(df)} rows after filtering; dropping")
-        return row
-
-    # TODO(jpgard): seems like this should be a TableFilter
-    if config.drop_extra_rows and len(df) > config.max_output_rows:
-        df = df.sample(n=config.max_output_rows, replace=False)
-
     logging.warning(f"[DEBUG] writing dataframe of shape {df.shape} to {filename}")
     # Write DataFrame to CSV
     if output_format == "csv":
@@ -66,7 +54,6 @@ class DataFrameFileDataSink:
     base_path: str
     output_format: str
     mem_per_writer: int
-    config: PreprocessConfig
     num_cpus_per_writer: int = 1
 
     def write(self, dataset):
@@ -88,9 +75,7 @@ class DataFrameFileDataSink:
             future = (write_dataframe_to_file
                       .options(num_cpus=self.num_cpus_per_writer,
                                memory=self.mem_per_writer)
-                      .remote(element, self.base_path,
-                              self.output_format,
-                              config=self.config))
+                      .remote(element, self.base_path, self.output_format))
 
             # Wait for all tasks to complete and return their filenames
             return ray.get(future)

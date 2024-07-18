@@ -51,7 +51,7 @@ from tabliblib.dedup_utils import path_to_str
 from tabliblib.filter.column_filters import ColumnFilterChain, MaxColumnsFilter, InvalidColumnsFilter
 from tabliblib.filter.filter_utils import is_english
 from tabliblib.filter.row_filters import RowFilterChain, MaxValueLengthFilter, SubstringFilter, CodeRegexFilter, \
-    PIIRegexFilter, DuplicateRowsFilter
+    PIIRegexFilter, DuplicateRowsFilter, MaxRowCountFilter
 from tabliblib.filter.table_filters import TableFilterChain, RowCountFilter, ColumnCountFilter, BadHeadersFilter, \
     TableQualityFilter, PIIDetectionFilter, CodeDetectionFilter, SchemaFilter, ValidColumnCountFilter
 from tabliblib.io import read_arrow_bytes, write_arrow_bytes
@@ -196,7 +196,7 @@ def main(
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
-    table_filter_chain = TableFilterChain([
+    table_filter_chain_pre = TableFilterChain([
         RowCountFilter(min_rows=preprocess_config.min_rows),
         ColumnCountFilter(min_columns=preprocess_config.min_cols,
                           max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
@@ -216,6 +216,9 @@ def main(
             classifier=clf,
             threshold=preprocess_config.table_quality_threshold),
     ])
+
+    table_filter_chain_post = TableFilterChain([
+        RowCountFilter(min_rows=preprocess_config.min_rows)])
 
     column_filter_chain = ColumnFilterChain()
     if preprocess_config.drop_invalid_cols:
@@ -242,6 +245,8 @@ def main(
         row_filter_chain.append(PIIRegexFilter())
     if preprocess_config.drop_duplicate_rows:
         row_filter_chain.append(DuplicateRowsFilter())
+    if preprocess_config.drop_extra_rows:
+        row_filter_chain.append(MaxRowCountFilter(preprocess_config.max_output_rows))
 
     def _column_filter_map_fn(row: Dict[str, Any]):
         # At this point, DataFrames should be valid; we want to raise an error if this is not the case
@@ -265,21 +270,19 @@ def main(
             row["arrow_bytes"] = None
         return row
 
-    # TODO(jpgard): do language detection inside the dataframe filter fn, so we only have to parse the
-    #  dataframe one time.
     _english_filter = partial(is_english, threshold=preprocess_config.langdetect_threshold)
     ds = (ds
           .filter(_english_filter)
-          .filter(table_filter_chain)
+          .filter(table_filter_chain_pre)
           .map(_column_filter_map_fn)
-          .map(_row_filter_map_fn))
+          .map(_row_filter_map_fn)
+          .filter(table_filter_chain_post))
 
     # Allocate more resources to writing; this requires more memory bc arrow bytes are expanded
     #  into a pandas dataframe.
     data_frame_sink = DataFrameFileDataSink(
         output_dir,
         output_format="parquet",
-        config=preprocess_config,
         mem_per_writer=write_mem_per_worker_gb if write_mem_per_worker_gb else 2 * read_mem_per_worker_gb,
     )
     # Write the dataset to CSV files

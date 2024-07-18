@@ -9,6 +9,7 @@ from tabliblib.filter import Filter, FilterChain
 from tabliblib.filter.filter_utils import is_string_column, contains_code, contains_pii
 from tabliblib.io import read_arrow_bytes
 
+
 @dataclass
 class RowFilter(Filter):
     """RowFilters modify a table based on row-level filtering criteria.
@@ -112,6 +113,18 @@ class MaxValueLengthFilter(RowFilter):
             df,
             filter_fn=lambda x: len(str(x)) > self.max_value_len_chars,
             string_columns_only=self.string_columns_only)
+
+
+@dataclass
+class MaxRowCountFilter(RowFilter):
+    max_rows: int
+    """If there are too many rows, randomly downsample them (without replacement)."""
+
+    def __call__(self, df: pd.DataFrame) -> Union[pd.DataFrame, None]:
+        if len(df) <= self.max_rows:
+            return df
+        else:
+            return df.sample(n=self.max_rows, replace=False)
 
 
 @dataclass
