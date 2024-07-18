@@ -45,7 +45,7 @@ import pyarrow as pa
 import ray
 from xgboost import XGBClassifier
 
-from tabliblib.config import PREPROCESS_VERSIONS
+from tabliblib.config import PREPROCESS_VERSIONS, PreprocessConfig
 from tabliblib.dataframe_utils import DataFrameFileDataSink
 from tabliblib.dedup_utils import path_to_str
 from tabliblib.filter.column_filters import ColumnFilterChain, MaxColumnsFilter, InvalidColumnsFilter
@@ -62,6 +62,69 @@ from tabliblib.summarizers import TableSummarizer
 RANDOM_SEED = 2974
 
 BYTES_PER_GB = 1024 * 1024 * 1024
+
+
+def make_table_filter_chain(preprocess_config: PreprocessConfig) -> TableFilterChain:
+    summarizer = TableSummarizer()
+
+    clf = XGBClassifier()
+    print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
+    clf.load_model(preprocess_config.table_quality_classifier)
+
+    return TableFilterChain([
+        RowCountFilter(min_rows=preprocess_config.min_rows),
+        ColumnCountFilter(min_columns=preprocess_config.min_cols,
+                          max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
+        BadHeadersFilter(
+            max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
+            max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
+        SchemaFilter(preprocess_config.min_dtypes),
+        ValidColumnCountFilter(
+            max_header_len_chars=preprocess_config.max_header_len_chars,
+            min_unique_column_values=preprocess_config.min_unique_column_values,
+            max_null_like_frac=preprocess_config.max_null_like_frac,
+            min_cols=preprocess_config.min_cols),
+        CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
+        PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
+        TableQualityFilter(
+            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
+            classifier=clf,
+            threshold=preprocess_config.table_quality_threshold),
+    ])
+
+
+def make_column_filter_chain(preprocess_config: PreprocessConfig) -> ColumnFilterChain:
+    column_filter_chain = ColumnFilterChain()
+    if preprocess_config.drop_invalid_cols:
+        column_filter_chain.append(
+            InvalidColumnsFilter(
+                max_header_len_chars=preprocess_config.max_header_len_chars,
+                min_unique_column_values=preprocess_config.min_unique_column_values,
+                max_null_like_frac=preprocess_config.max_null_like_frac
+            )
+        )
+    if preprocess_config.drop_extra_cols:
+        column_filter_chain.append(
+            MaxColumnsFilter(preprocess_config.max_cols)
+        )
+    return column_filter_chain
+
+
+def make_row_filter_chain(preprocess_config: PreprocessConfig) -> RowFilterChain:
+    row_filter_chain = RowFilterChain()
+    if preprocess_config.max_value_len_chars:
+        row_filter_chain.append(MaxValueLengthFilter(preprocess_config.max_value_len_chars))
+    if preprocess_config.filter_rows_containing_substrings:
+        row_filter_chain.append(SubstringFilter(preprocess_config.filter_rows_containing_substrings))
+    if preprocess_config.filter_rows_containing_code:
+        row_filter_chain.append(CodeRegexFilter())
+    if preprocess_config.filter_rows_containing_pii:
+        row_filter_chain.append(PIIRegexFilter())
+    if preprocess_config.drop_duplicate_rows:
+        row_filter_chain.append(DuplicateRowsFilter())
+    if preprocess_config.drop_extra_rows:
+        row_filter_chain.append(MaxRowCountFilter(preprocess_config.max_output_rows))
+    return row_filter_chain
 
 
 def get_parallelism(num_cores, available_memory, partition_size):
@@ -188,69 +251,20 @@ def main(
     print(f"[INFO] schema is {ds.schema()}")
     print(f"[INFO] ds is {ds}")
 
-    clf = XGBClassifier()
-    print(f"reloading model from saved checkpoint {preprocess_config.table_quality_classifier}")
-    clf.load_model(preprocess_config.table_quality_classifier)
-    summarizer = TableSummarizer()
-
     ds = ds.map(add_dataframe_summary_info) \
         .map(detect_language)
 
-    table_filter_chain_pre = TableFilterChain([
-        RowCountFilter(min_rows=preprocess_config.min_rows),
-        ColumnCountFilter(min_columns=preprocess_config.min_cols,
-                          max_columns=preprocess_config.max_cols if preprocess_config.filter_too_many_columns else None),
-        BadHeadersFilter(
-            max_frac_numeric_colnames=preprocess_config.max_frac_numeric_colnames,
-            max_frac_unnamed_columns=preprocess_config.max_frac_unnamed_columns),
-        SchemaFilter(preprocess_config.min_dtypes),
-        ValidColumnCountFilter(
-            max_header_len_chars=preprocess_config.max_header_len_chars,
-            min_unique_column_values=preprocess_config.min_unique_column_values,
-            max_null_like_frac=preprocess_config.max_null_like_frac,
-            min_cols=preprocess_config.min_cols),
-        CodeDetectionFilter(preprocess_config.code_detect_filter_threshold),
-        PIIDetectionFilter(preprocess_config.pii_detect_filter_threshold),
-        TableQualityFilter(
-            feature_extraction_fn=lambda x: pd.DataFrame([summarizer(x)]).drop(columns=["table_n"]),
-            classifier=clf,
-            threshold=preprocess_config.table_quality_threshold),
-    ])
+    table_filter_chain_pre = make_table_filter_chain(preprocess_config)
 
+    # TODO(jpgard): add an option to apply the TableQualityFilter here instead.
     table_filter_chain_post = TableFilterChain([
         RowCountFilter(min_rows=preprocess_config.min_rows)])
 
-    column_filter_chain = ColumnFilterChain()
-    if preprocess_config.drop_invalid_cols:
-        column_filter_chain.append(
-            InvalidColumnsFilter(
-                max_header_len_chars=preprocess_config.max_header_len_chars,
-                min_unique_column_values=preprocess_config.min_unique_column_values,
-                max_null_like_frac=preprocess_config.max_null_like_frac
-            )
-        )
-    if preprocess_config.drop_extra_cols:
-        column_filter_chain.append(
-            MaxColumnsFilter(preprocess_config.max_cols)
-        )
+    column_filter_chain = make_column_filter_chain(preprocess_config)
 
-    row_filter_chain = RowFilterChain()
-    if preprocess_config.max_value_len_chars:
-        row_filter_chain.append(MaxValueLengthFilter(preprocess_config.max_value_len_chars))
-    if preprocess_config.filter_rows_containing_substrings:
-        row_filter_chain.append(SubstringFilter(preprocess_config.filter_rows_containing_substrings))
-    if preprocess_config.filter_rows_containing_code:
-        row_filter_chain.append(CodeRegexFilter())
-    if preprocess_config.filter_rows_containing_pii:
-        row_filter_chain.append(PIIRegexFilter())
-    if preprocess_config.drop_duplicate_rows:
-        row_filter_chain.append(DuplicateRowsFilter())
-    if preprocess_config.drop_extra_rows:
-        row_filter_chain.append(MaxRowCountFilter(preprocess_config.max_output_rows))
+    row_filter_chain = make_row_filter_chain(preprocess_config)
 
     def _column_filter_map_fn(row: Dict[str, Any]):
-        # At this point, DataFrames should be valid; we want to raise an error if this is not the case
-        # because this would mean the filtering is not right.
         df = read_arrow_bytes(row["arrow_bytes"], raise_on_error=True)
         df_out = column_filter_chain(df)
         if df_out is not None and len(df_out):
@@ -260,8 +274,6 @@ def main(
         return row
 
     def _row_filter_map_fn(row: Dict[str, Any]):
-        # At this point, DataFrames should be valid; we want to raise an error if this is not the case
-        # because this would mean the filtering is not right.
         df = read_arrow_bytes(row["arrow_bytes"], raise_on_error=True)
         df_out = row_filter_chain(df)
         if df_out is not None and len(df_out):
