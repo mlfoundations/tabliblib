@@ -117,3 +117,21 @@ def load_shard(shard) -> List[TabLibElement]:
     # tmp = [pa.RecordBatchStreamReader(b).read_all() for b in df['arrow_bytes']]
     tmp = [TabLibElement.from_series(s) for _, s in df.iterrows()]
     return tmp
+
+
+def convert_bytes_to_string(byte_sequence) -> str:
+    # List of encodings to try
+    encodings = ['utf-8', 'ascii', 'iso-8859-1', 'utf-16', 'utf-32']
+
+    # Iterate through each encoding
+    for encoding in encodings:
+        try:
+            # Attempt to decode the byte sequence
+            decoded_string = byte_sequence.decode(encoding)
+            # If successful, return the string and encoding used
+            return decoded_string
+        except UnicodeDecodeError:
+            # If decoding fails, continue to the next encoding
+            continue
+
+    raise ValueError(f"could not encode object of type {type(byte_sequence)}: {byte_sequence}")

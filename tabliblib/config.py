@@ -1,7 +1,6 @@
 import json
-import os
 from dataclasses import dataclass
-from typing import Optional, Sequence, Dict
+from typing import Optional, Sequence, Dict, Literal
 
 
 @dataclass
@@ -13,7 +12,7 @@ class PreprocessConfig:
     max_frac_numeric_colnames: Optional[float] = 0.1  # if None, this threshold is not applied.
     langdetect_threshold: float = 0.5
     min_rows: int = 100
-    max_rows: int = 1000
+    max_output_rows: int = 1000
     max_frac_unnamed_columns: Optional[float] = 0.5
     drop_extra_rows: bool = True
     min_cols: int = 6
@@ -24,9 +23,10 @@ class PreprocessConfig:
     code_detect_filter_threshold: Optional[
         float] = None  # if any columns has >= this proportion of code detected, drop the table
 
-    # Note that the quality classifier, if used, is applied AFTER the row- and column-level filtering.
     table_quality_threshold: Optional[float] = None
-    table_quality_classifier: Optional[str] = os.path.join(os.path.dirname(__file__), "xgb_quality_scorer.json")
+    table_quality_classifier: Optional[str] = None
+    # Whether the classifier gets applied before row/column filtering ("pre") or after ("post").
+    table_quality_classifier_position: Literal["pre", "post"] = "post"
 
     # Column-level filters
     drop_invalid_cols: bool = True
@@ -87,7 +87,7 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                            drop_duplicate_rows=True,
                            max_frac_unnamed_columns=0.5,
                            min_dtypes=None),
-"v7": PreprocessConfig(max_null_like_frac=0.1,
+    "v7": PreprocessConfig(max_null_like_frac=0.1,
                            drop_extra_cols=True,
                            drop_invalid_cols=True,
                            pii_detect_filter_threshold=0.05,
@@ -97,7 +97,27 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                            filter_rows_containing_code=True,
                            drop_duplicate_rows=True,
                            max_frac_unnamed_columns=0.5,
-                           min_dtypes=None),
+                           min_dtypes=None,
+                           table_quality_threshold=0.0055,
+                           table_quality_classifier="xgb_quality_scorer.json",
+                           table_quality_classifier_position="pre",
+
+                           ),
+    "v8": PreprocessConfig(max_null_like_frac=0.1,
+                           drop_extra_cols=True,
+                           drop_invalid_cols=True,
+                           pii_detect_filter_threshold=0.05,
+                           code_detect_filter_threshold=0.05,
+                           filter_rows_containing_pii=True,
+                           min_rows=64,
+                           filter_rows_containing_code=True,
+                           drop_duplicate_rows=True,
+                           max_frac_unnamed_columns=0.5,
+                           min_dtypes=None,
+                           table_quality_threshold=0.0055,
+                           table_quality_classifier="xgb_quality_scorer.json",
+                           table_quality_classifier_position="post",
+                           ),
     # "Unfiltered" version of TabLib, except some filters
     # to ensure inputs do not exceed memory/disk limitations
     # and can fit into downstream context window.
@@ -105,7 +125,7 @@ PREPROCESS_VERSIONS: Dict[str, PreprocessConfig] = {
                                  max_frac_numeric_colnames=1.,
                                  langdetect_threshold=0.,
                                  min_rows=1,
-                                 max_rows=1000,
+                                 max_output_rows=1000,
                                  max_frac_unnamed_columns=1,
                                  drop_extra_rows=True,
                                  min_cols=1,
