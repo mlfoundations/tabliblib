@@ -18,7 +18,6 @@ from tqdm import tqdm
 
 nltk.download("punkt")
 
-from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 from tabliblib.summarizers import TableSummarizer
@@ -81,7 +80,7 @@ def main(create_train_data: bool = True,
          ),
          low_quality_fileglob: str = "../../tablm/tmp/v6.0.0-sample/*.parquet",
          output_dir: str = "table_quality_clf",
-         n_trials:int=2,
+         n_trials: int = 20,
          ):
     # Generate a unique run ID
     run_id = str(uuid.uuid4())
@@ -106,7 +105,7 @@ def main(create_train_data: bool = True,
         "high_quality_fileglobs": high_quality_fileglobs,
         "low_quality_fileglob": low_quality_fileglob,
         "run_id": run_id,
-        "n_trials":n_trials,
+        "n_trials": n_trials,
     }
     yaml_file = os.path.join(output_dir, f"run_config_{run_id}.yaml")
     print(f"writing kwargs to file {yaml_file}: {kwargs}")
