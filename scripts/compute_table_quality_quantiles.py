@@ -36,7 +36,7 @@ def _process_file(f):
 
 
 def prepare_data(low_quality_fileglob: str):
-    all_files = glob.glob(low_quality_fileglob)[:200]
+    all_files = glob.glob(low_quality_fileglob)
 
     num_cores = multiprocessing.cpu_count()
 
