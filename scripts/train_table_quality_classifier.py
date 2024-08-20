@@ -4,12 +4,16 @@ python scripts/train_quality_classifier.py --save_model --create_train_data
 """
 import glob
 import multiprocessing
+import os
 import random
+import uuid
+from typing import Sequence, Optional, Union
 
 import fire
 import nltk
 import numpy as np
 import pandas as pd
+import yaml
 from tqdm import tqdm
 
 nltk.download("punkt")
@@ -35,19 +39,16 @@ def _process_file(f):
     return file_metadata
 
 
-def make_train_data():
-    low_quality_files = glob.glob("/Users/jpgard/Documents/github/tablm/tmp/v6.0.0-sample/*.parquet")
-    print(f"got {len(low_quality_files)} low-quality files")
+def make_train_data(high_quality_fileglobs: Union[str, Sequence[str]],
+                    low_quality_fileglob: str) -> pd.DataFrame:
+    if isinstance(high_quality_fileglobs, str):
+        high_quality_fileglobs = [high_quality_fileglobs, ]
 
-    high_quality_fileglobs = [
-        "/Users/jpgard/Documents/github/tablm/tmp/grinsztajn/**/*.csv",
-        "/Users/jpgard/Documents/github/tablm/tmp/openml_cc18/**/*.csv",
-        "/Users/jpgard/Documents/github/tablm/tmp/unipredict/**/*.csv",
-        "/Users/jpgard/Documents/github/tablm/tmp/openml_ctr23/**/*.csv",
-        "/Users/jpgard/Documents/github/tablm/tmp/ucidata/**/*.csv",
-        "/Users/jpgard/Documents/github/tablm/tmp/pmlb/**/*.csv",
-    ]
+    low_quality_files = glob.glob(low_quality_fileglob)
+    print(f"got {len(low_quality_files)} low-quality files matching {low_quality_fileglob}")
+
     high_quality_files = [f for fg in high_quality_fileglobs for f in glob.glob(fg, recursive=True)]
+    print(f"got {len(high_quality_files)} high-quality files matching {high_quality_fileglobs}")
 
     all_files = low_quality_files + high_quality_files
     random.shuffle(all_files)
@@ -61,19 +62,64 @@ def make_train_data():
 
     df = pd.DataFrame(all_metadata)
     df["quality"] = df["src_file"].apply(lambda f: int(f in high_quality_files))
-    df.to_csv("table_quality_data.csv", index=False)
     return df
 
 
-def main(create_train_data: bool = False,
+def main(create_train_data: bool = True,
+         save_train_data: bool = True,
          save_model: bool = True,
-         filename: str = "table_quality_data.csv",
-         model_path="xgb_quality_scorer.json",
-         reload_for_eval: bool = False):
+         train_data_csv: Optional[str] = None,
+         reload_for_eval: bool = False,
+         high_quality_fileglobs: Sequence[str] = (
+                 "../../tablm/tmp/grinsztajn/**/*.csv",
+                 "../../tablm/tmp/openml_cc18/**/*.csv",
+                 "../../tablm/tmp/unipredict/**/*.csv",
+                 "../../tablm/tmp/openml_ctr23/**/*.csv",
+                 "../../tablm/tmp/ucidata/**/*.csv",
+                 "../../tablm/tmp/pmlb/**/*.csv",
+         ),
+         low_quality_fileglob: str = "../../tablm/tmp/v6.0.0-sample/*.parquet",
+         output_dir: str = "table_quality_clf",
+         ):
+    # Generate a unique run ID
+    run_id = str(uuid.uuid4())
+    print(f"run_id for this run is {run_id}")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    model_path = os.path.abspath(os.path.join(output_dir, f"xgb_table_quality_scorer_{run_id}.json"))
+
+    print(f"model will be saved to {model_path}")
+
+    if not train_data_csv:
+        train_data_csv = os.path.abspath(os.path.join(output_dir, f"table_quality_data_{run_id}.csv"))
+
+    # Save kwargs and run_id to a YAML file
+    kwargs = {
+        "create_train_data": create_train_data,
+        "save_train_data": save_train_data,
+        "output_dir": output_dir,
+        "save_model": save_model,
+        "train_data_csv": train_data_csv,
+        "model_path": model_path,
+        "reload_for_eval": reload_for_eval,
+        "high_quality_fileglobs": high_quality_fileglobs,
+        "low_quality_fileglob": low_quality_fileglob,
+        "run_id": run_id
+    }
+    yaml_file = os.path.join(output_dir, f"run_config_{run_id}.yaml")
+    print(f"writing kwargs to file {yaml_file}: {kwargs}")
+
+    with open(yaml_file, 'w') as yaml_file:
+        yaml.dump(kwargs, yaml_file)
+
     if create_train_data:
-        df = make_train_data()
+        df = make_train_data(high_quality_fileglobs=high_quality_fileglobs,
+                             low_quality_fileglob=low_quality_fileglob)
+        if save_train_data:
+            df.to_csv(train_data_csv, index=False)
     else:
-        df = pd.read_csv(filename)
+        df = pd.read_csv(train_data_csv)
 
     df = df.replace({float("inf"): np.nan})
 
