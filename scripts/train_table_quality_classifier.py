@@ -22,6 +22,7 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 from tabliblib.summarizers import TableSummarizer
+from rtfm.tree_baselines import tune_xgb
 
 
 def _process_file(f):
@@ -80,6 +81,7 @@ def main(create_train_data: bool = True,
          ),
          low_quality_fileglob: str = "../../tablm/tmp/v6.0.0-sample/*.parquet",
          output_dir: str = "table_quality_clf",
+         n_trials:int=2,
          ):
     # Generate a unique run ID
     run_id = str(uuid.uuid4())
@@ -88,8 +90,6 @@ def main(create_train_data: bool = True,
     os.makedirs(output_dir, exist_ok=True)
 
     model_path = os.path.abspath(os.path.join(output_dir, f"xgb_table_quality_scorer_{run_id}.json"))
-
-    print(f"model will be saved to {model_path}")
 
     if not train_data_csv:
         train_data_csv = os.path.abspath(os.path.join(output_dir, f"table_quality_data_{run_id}.csv"))
@@ -105,7 +105,8 @@ def main(create_train_data: bool = True,
         "reload_for_eval": reload_for_eval,
         "high_quality_fileglobs": high_quality_fileglobs,
         "low_quality_fileglob": low_quality_fileglob,
-        "run_id": run_id
+        "run_id": run_id,
+        "n_trials":n_trials,
     }
     yaml_file = os.path.join(output_dir, f"run_config_{run_id}.yaml")
     print(f"writing kwargs to file {yaml_file}: {kwargs}")
@@ -131,8 +132,12 @@ def main(create_train_data: bool = True,
     target_colname = "quality"
     train_drop_colnames = ["src_file", "table_n"]  # table_n is the most predictive feature if allowed.
     train_df, test_df = train_test_split(df, train_size=0.8, random_state=42, stratify=df[target_colname])
-    clf = XGBClassifier()
-    clf.fit(train_df.drop(columns=[target_colname, *train_drop_colnames]), train_df[target_colname])
+    # clf = XGBClassifier()
+    # clf.fit(train_df.drop(columns=[target_colname, *train_drop_colnames]), train_df[target_colname])
+    clf = tune_xgb(X_tr=train_df.drop(columns=[target_colname, *train_drop_colnames]),
+                   y_tr=train_df[target_colname],
+                   n_trials=n_trials)
+    clf = clf.best_estimator_
 
     if save_model:
         print(f"saving model to {model_path}")
