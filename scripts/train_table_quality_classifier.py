@@ -16,8 +16,6 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
-nltk.download("punkt")
-
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 from tabliblib.summarizers import TableSummarizer
@@ -131,8 +129,7 @@ def main(create_train_data: bool = True,
     target_colname = "quality"
     train_drop_colnames = ["src_file", "table_n"]  # table_n is the most predictive feature if allowed.
     train_df, test_df = train_test_split(df, train_size=0.8, random_state=42, stratify=df[target_colname])
-    # clf = XGBClassifier()
-    # clf.fit(train_df.drop(columns=[target_colname, *train_drop_colnames]), train_df[target_colname])
+
     clf = tune_xgb(X_tr=train_df.drop(columns=[target_colname, *train_drop_colnames]),
                    y_tr=train_df[target_colname],
                    n_trials=n_trials)
