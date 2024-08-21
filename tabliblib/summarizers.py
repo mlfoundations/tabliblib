@@ -1,9 +1,9 @@
 import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Callable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -292,7 +292,14 @@ class TableSummarizer:
     datetime_summarizer: DateTimeColumnSummarizer = DateTimeColumnSummarizer()
     # multicolumn_summarizer: MultiColumnSummarizer = MultiColumnSummarizer()
     header_summarizer: HeaderSummarizer = HeaderSummarizer()
-    agg_quantiles = (0.1, 0.25, 0.75, 0.9)
+    agg_quantiles:Optional[Sequence[float]] = (0.1, 0.25, 0.75, 0.9)
+    agg_fns: Dict[str, Callable[[Sequence[Any]], float]] = field(default_factory=lambda: {
+        "min": np.nanmin,
+        "max": np.nanmax,
+        "mean": np.nanmean,
+        "median": np.nanmedian,
+    })
+    include_table_summary_metrics: bool = True
 
     @property
     def summarizers_to_check_keys(self):
@@ -329,7 +336,7 @@ class TableSummarizer:
 
         return {prefix + k: v for k, v in output.items()}
 
-    def __call__(self, df: pd.DataFrame) -> pd.Series:
+    def _compute_column_summary_stats(self, df: pd.DataFrame) -> Dict[str, List]:
         stats = defaultdict(list)
         for colname in df.columns:
             col = df[colname]
@@ -346,40 +353,72 @@ class TableSummarizer:
             col_summary.update(self.header_summarizer(colname))
             for k, v in col_summary.items():
                 stats[k].append(v)
+        return stats
 
-        # for k, v in self.multicolumn_summarizer(df).items():
-        #     stats[k].extend(v)
-
-        result = {}
-
-        # Compute min, median, mean, max for all collected stats
-        for stat, values in stats.items():
-            result[f"{stat}_min"] = np.nanmin(values)
-            result[f"{stat}_med"] = np.nanmedian(values)
-            result[f"{stat}_mean"] = np.nanmean(values)
-            result[f"{stat}_max"] = np.nanmax(values)
-
-            for quantile in self.agg_quantiles:
-                result[f"{stat}_quantile{quantile}"] = np.nanquantile(values, q=quantile)
-
-        # Ensure that every column is in the output.
+    @property
+    def expected_keys(self) -> List[str]:
         expected_keys = []
         for summarizer in self.summarizers_to_check_keys:
             for output_col in summarizer.output_keys:
                 for quantile in self.agg_quantiles:
                     expected_keys.append(f"{output_col}_quantile{quantile}")
-                for agg_func in ("min", "med", "mean", "max"):
+                for agg_func in self.agg_fns.keys():
                     expected_keys.append(f"{output_col}_{agg_func}")
+        return expected_keys
 
+    def __call__(self, df: pd.DataFrame) -> pd.Series:
+        stats = self._compute_column_summary_stats(df)
+
+        result = {}
+
+        # Compute min, median, mean, max for all collected stats
+        for stat, values in stats.items():
+            for agg_name, agg_fn in self.agg_fns.items():
+                result[f"{stat}_{agg_name}"] = agg_fn(values)
+
+            for quantile in self.agg_quantiles:
+                result[f"{stat}_quantile{quantile}"] = np.nanquantile(values, q=quantile)
+
+        # Ensure that every column is in the output.
+        expected_keys = self.expected_keys
         for expected_key in expected_keys:
             if expected_key not in result.keys():
-                # print(f"[DEBUG] adding key {expected_key} to output")
                 result[expected_key] = np.nan
 
         features_after_check = len(result)
         assert features_after_check == len(expected_keys)
 
-        # add table-level features
-        result.update(self.summarize_table(df))
+        if self.include_table_summary_metrics:
+            # add table-level features
+            result.update(self.summarize_table(df))
 
         return pd.Series(result)
+
+class SingleColumnSummarizer(TableSummarizer):
+
+    @property
+    def expected_keys(self) -> List[str]:
+        expected_keys = []
+        for summarizer in self.summarizers_to_check_keys:
+            for output_col in summarizer.output_keys:
+                expected_keys.append(output_col)
+        return expected_keys
+    def __call__(self, ser:pd.Series) -> pd.Series:
+        assert isinstance(ser, pd.Series), f"expected type pd.Series, got {type(ser)}"
+        df = pd.DataFrame(ser)
+        stats = self._compute_column_summary_stats(df)
+        stats = {k:v[0] for k,v in stats.items()}
+
+
+        # Ensure that every column is in the output.
+        expected_keys = self.expected_keys
+        for expected_key in expected_keys:
+            if expected_key not in stats.keys():
+                stats[expected_key] = np.nan
+
+        features_after_check = len(stats)
+        assert features_after_check == len(expected_keys)
+
+        return pd.Series(stats)
+
+
