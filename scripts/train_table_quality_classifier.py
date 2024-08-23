@@ -10,7 +10,6 @@ import uuid
 from typing import Sequence, Optional, Union
 
 import fire
-import nltk
 import numpy as np
 import pandas as pd
 import yaml
@@ -80,6 +79,8 @@ def main(create_train_data: bool = True,
          output_dir: str = "table_quality_clf",
          n_trials: int = 20,
          ):
+    print("#" * 50)
+
     # Generate a unique run ID
     run_id = str(uuid.uuid4())
     print(f"run_id for this run is {run_id}")

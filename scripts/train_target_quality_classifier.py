@@ -3,27 +3,27 @@
 Note: it is recommended to run the following to clean up tine_sklearn results after this script:
 rm -rf ~/ray_results/
 """
+import multiprocessing as mp
 import os
 import re
 import time
-from typing import List, Any
-import yaml
 import uuid
-import multiprocessing as mp
+from typing import List, Any, Sequence
 
+import fire
+import numpy as np
+import pandas as pd
+import yaml
+from rtfm.tree_baselines import tune_xgb
+from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 # Note: it is important to import this early. Importing later
 # seems to cause segmentation faults, potentially related to libomp see discussion here:
 # https://github.com/dmlc/xgboost/issues/7039#issuecomment-860910066
 from xgboost import XGBClassifier
 
-import fire
-import numpy as np
-import pandas as pd
-from rtfm.tree_baselines import tune_xgb
-from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
-from sklearn.model_selection import train_test_split
 from tabliblib.summarizers import SingleColumnSummarizer
-from tqdm import tqdm
 
 # TODO(jpgard): should we remove DateTime summarizer? Verify that there
 #  exist DateTime columns in the target datasets.
@@ -31,7 +31,8 @@ summarizer = SingleColumnSummarizer(agg_fns={},
                                     agg_quantiles=[],
                                     include_table_summary_metrics=False)
 
-def process_files(root, dirs, files) ->List[Any]:
+
+def process_files(root, dirs, files) -> List[Any]:
     obs = []
     # Skip UCI "variables" subdirectories
     if any([re.match("variables.*\\.csv", f) for f in files]):
@@ -66,19 +67,23 @@ def process_files(root, dirs, files) ->List[Any]:
             obs.append(col_sum)
     return obs
 
+
 def main(save_model: bool = True,
          reload_for_eval: bool = False,
          output_dir: str = "target_quality_clf",
          n_trials: int = 50,
+         train_data_dirs: Sequence[str] = (
+                 "../../tablm/tmp/grinsztajn/",
+                 "../../tablm/tmp/openml_cc18/",
+                 "../../tablm/tmp/unipredict/",
+                 "../../tablm/tmp/openml_ctr23/",
+                 "../../tablm/tmp/pmlb/",
+                 "../../tablm/tmp/ucidata/",
+         )
          ):
-    dirs = [
-        "../../tablm/tmp/grinsztajn/",
-        "../../tablm/tmp/openml_cc18/",
-        "../../tablm/tmp/unipredict/",
-        "../../tablm/tmp/openml_ctr23/",
-        "../../tablm/tmp/pmlb/",
-        "../../tablm/tmp/ucidata/",
-    ]
+    print("#" * 50)
+    if isinstance(train_data_dirs, str):
+        train_data_dirs = (train_data_dirs,)
 
     # Generate a unique run ID
     run_id = str(uuid.uuid4())
@@ -94,7 +99,7 @@ def main(save_model: bool = True,
         "save_model": save_model,
         "model_path": model_path,
         "reload_for_eval": reload_for_eval,
-        "dirs": dirs,
+        "train_data_dirs": train_data_dirs,
         "run_id": run_id,
         "n_trials": n_trials,
     }
@@ -105,7 +110,7 @@ def main(save_model: bool = True,
     with open(yaml_file, 'w') as yaml_file:
         yaml.dump(kwargs, yaml_file)
 
-    total_dirs = sum(len(list(os.walk(d))) for d in dirs)
+    total_dirs = sum(len(list(os.walk(d))) for d in train_data_dirs)
 
     with tqdm(total=total_dirs, unit='dir', desc='Processing', ncols=70) as pbar:
         start_time = time.time()
@@ -113,7 +118,7 @@ def main(save_model: bool = True,
 
         obs: List[pd.Series] = []
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            for directory in dirs:
+            for directory in train_data_dirs:
                 for root, subdirs, files in os.walk(directory):
                     # obs.extend(process_files(root, subdirs, files))
                     obs.extend(pool.apply_async(process_files, args=(root, subdirs, files)).get())
@@ -139,6 +144,7 @@ def main(save_model: bool = True,
                    y_tr=train_df[target_colname],
                    n_trials=n_trials)
     clf = clf.best_estimator_
+    assert isinstance(clf, XGBClassifier)
 
     if save_model:
         print(f"saving model to {model_path}")
