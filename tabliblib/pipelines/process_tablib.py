@@ -7,10 +7,10 @@ Usage:
 Make sure to start the ray head node first with `ray start --head `. Then:
 
 # local test
-python scripts/process_tablib.py \
+python -m tabliblib.pipelines.process_tablib \
     --data_dir "sample-shards/tablib-v1-sample-tiny/" \
-    --config_version v7 \
-    --output_dir ./tmp/tablib_processed/v7v2/ \
+    --config_version v9.4 \
+    --output_dir ./tmp/tablib_processed/v9.4/ \
     --read_mem_per_worker_gb 2 \
     --dedup_dir ./tmp/tablib_processed/dedup/
 
@@ -19,7 +19,7 @@ python scripts/process_tablib.py \
 ray start --head --temp-dir=/gscratch/scrubbed/jpgard/ray-tmp
 ray start --head --temp-dir=/gscratch/efml/jpgard/tabliblib/ray-tmp
 unset http_proxy; unset https_proxy; \
-python scripts/process_tablib.py \
+python -m tabliblib.pipelines.process_tablib \
     --data_dir "/data/tablib/tablib/" \
     --dedup_dir "/gscratch/efml/jpgard/tabliblib/dedup/content_hash_index/job4/" \
     --output_dir /gscratch/efml/jpgard/tabliblib/processed/v6.0.0-tmp/ \
