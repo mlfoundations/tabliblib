@@ -9,12 +9,15 @@ from tabliblib.filter.filter_utils import has_bad_column_headers, is_string_colu
     compute_frac_contains_pii, fetch_names_of_valid_columns
 from tabliblib.io import read_arrow_bytes
 
+
 class TableFilter(Filter):
     """TableFilters either include or exclude a table. They never modify the table."""
 
     @abstractmethod
     def __call__(self, df: pd.DataFrame) -> bool:
         raise
+
+
 @dataclass
 class TableFilterChain(FilterChain):
     """A chain of TableFilters, applied sequentially."""
@@ -52,9 +55,6 @@ class TableFilterChain(FilterChain):
             if not filter_obj(df):
                 return False
         return True
-
-
-
 
 
 @dataclass
