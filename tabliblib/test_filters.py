@@ -2,20 +2,23 @@
 To run tests:
 python -m unittest tabliblib/test_filters.py
 """
+import os
 import random
 import string
 import unittest
 from typing import List
 
+from xgboost import XGBClassifier
 import numpy as np
 import pandas as pd
-from xgboost import XGBClassifier
 
 from tabliblib.summarizers import TableSummarizer
 from tabliblib.filter.filter_utils import contains_code, contains_pii, is_kv_header, compute_frac_numeric_colnames, \
     compute_frac_null_like, compute_frac_contains_code
 from tabliblib.filter.row_filters import apply_row_based_filter
 
+XGB_QUALITY_SCORER_JSON = "table_quality_clf/xgb_table_quality_scorer_for_testing.json"
+assert os.path.exists(XGB_QUALITY_SCORER_JSON), f"XGB quality scorer {XGB_QUALITY_SCORER_JSON} does not exist."
 
 def generate_random_words() -> List[str]:
     return [''.join(random.choices(string.ascii_lowercase, k=random.randint(3, 10))) for _ in range(20)]
@@ -248,7 +251,7 @@ class TestTableFilterChain(unittest.TestCase):
         table_filter_chain = TableFilterChain([RowCountFilter(min_rows=5), ColumnCountFilter(min_columns=2)])
         self.assertFalse(table_filter_chain(None))
 
-    def test_table_quality_filter(self, model_path="xgb_quality_scorer.json"):
+    def test_table_quality_filter(self, model_path=XGB_QUALITY_SCORER_JSON):
         df = pd.DataFrame({
             "x": [199, 299, 399],
             "1.456": [199, 299, 399],
